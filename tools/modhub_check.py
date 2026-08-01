@@ -1,8 +1,9 @@
 """ModHub readiness audit for FS25_TransportCompany.
 
-GIANTS' own TestRunner is a separate GDN download and is not installed
-here, so this checks the things ModHub submissions are actually
-rejected for, against the built zip rather than the working tree:
+Run alongside GIANTS' own TestRunner, not instead of it. This is the
+fast local pass over the built zip; the TestRunner is the authority.
+
+It checks the things ModHub submissions are actually rejected for:
 
   * modDesc completeness and descVersion range (main.lua:29-30)
   * every file modDesc references exists inside the zip
@@ -188,6 +189,33 @@ def main():
         else:
             inline = l10n.findall("text")
             ok("l10n embedded in modDesc (%d entries)" % len(inline))
+
+    # --- every referenced texture must be DDS ------------------------
+    # The GIANTS TestRunner looks up parsed DDS data for each texture a
+    # mod references and dies on a PNG with
+    #   AttributeError: 'NoneType' object has no attribute 'header_dx10'
+    # (DXTCheck.py:124). That is a hard submission blocker, so it is an
+    # error here rather than a style note.
+    tex_ext = (".png", ".jpg", ".jpeg", ".tga", ".bmp")
+    tex_refs = set()
+    for n in names:
+        if n.endswith((".xml", ".lua")):
+            body = z.read(n).decode("utf-8-sig", "replace")
+            for m in re.finditer(r'[\w/\.-]+\.(?:dds|png|jpg|jpeg|tga|bmp)', body):
+                ref = m.group(0).replace("\\", "/")
+                if not ref.startswith("$"):
+                    tex_refs.add(ref)
+    raster = sorted(r for r in tex_refs if r.lower().endswith(tex_ext))
+    if raster:
+        for r in raster:
+            err("texture referenced as a raster image, not DDS: %s "
+                "(TestRunner DXTCheck crashes on this)" % r)
+    else:
+        ok("all %d referenced textures are DDS" % len(tex_refs))
+
+    shipped_raster = sorted(n for n in names if n.lower().endswith(tex_ext))
+    if shipped_raster:
+        warn("raster images shipped in the zip: %s" % ", ".join(shipped_raster[:5]))
 
     # --- content sanity ----------------------------------------------
     abs_path = re.compile(r"[A-Za-z]:[\\/]|/Users/|/home/")

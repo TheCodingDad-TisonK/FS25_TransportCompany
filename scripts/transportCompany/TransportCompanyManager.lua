@@ -361,7 +361,7 @@ function TransportCompanyManager:_registerPdaPage()
         -- A table is treated as pixel values and divided by the 1024
         -- reference size (GuiUtils.lua:31), so {0,0,1,1} would select a
         -- single pixel; "0 0 1 1" is passed through untouched.
-        local iconFile = Utils.getFilename("textures/tab_transportCompany.png", self.modDirectory)
+        local iconFile = Utils.getFilename("textures/tab_transportCompany.dds", self.modDirectory)
         if type(inGameMenu.addPageTab) == "function" and GuiUtils ~= nil then
             pcall(inGameMenu.addPageTab, inGameMenu, screen, iconFile, GuiUtils.getUVs("0 0 1 1"))
         end
@@ -483,17 +483,22 @@ function TransportCompanyManager:_regenerateContractBoard()
         )
     end
 
-    if activeCount < maxActive then
-        -- Generation gave up early. Report what the map actually offers,
-        -- so an empty board can be told apart from a map with no viable
-        -- routes at all.
-        local ai, stocked, routes, stations, orphan =
-            TransportCompanyContract.countRoutes(boardFarmId)
+    -- Always report, not just on a shortfall. A full board built entirely
+    -- from non-AI routes looks healthy but leaves "Hire driver" refusing
+    -- every time, and that is invisible without these numbers.
+    local ai, stocked, routes, stations, orphan =
+        TransportCompanyContract.countRoutes(boardFarmId)
+    TransportCompanyLog.info(
+        "board: %d/%d contracts (farm %s; %d loading stations, %d without a "
+        .. "placeable, %d routes, %d stocked, %d AI-haulable)",
+        activeCount, maxActive, tostring(boardFarmId),
+        stations, orphan, routes, stocked, ai
+    )
+    if ai == 0 and routes > 0 then
         TransportCompanyLog.info(
-            "board: %d/%d contracts (farm %s; %d loading stations, %d without a "
-            .. "placeable, %d routes, %d stocked, %d AI-haulable)",
-            activeCount, maxActive, tostring(boardFarmId),
-            stations, orphan, routes, stocked, ai
+            "board: no AI-haulable route on this map for farm %s -- hired "
+            .. "drivers will be refused; these jobs must be hauled in person",
+            tostring(boardFarmId)
         )
     end
 end

@@ -112,5 +112,8 @@
         <e k="transportCompany_hireNotAiFillType" v="Angestellte Fahrer können diese Ware an dieser Station nicht laden. Selbst fahren geht weiterhin."/>
         <e k="transportCompany_hireNoStation" v="Die Lade- oder Abladestelle dieses Auftrags gibt es nicht mehr."/>
         <e k="transportCompany_hireNoFarm" v="Dieser Auftrag gehört keinem Hof."/>
+        <e k="transportCompany_hireAvailable" v="Möglich"/>
+        <e k="transportCompany_hireUnavailable" v="Nicht möglich"/>
+        <e k="transportCompany_hireReason" v="Grund"/>
     </elements>
 </l10n>

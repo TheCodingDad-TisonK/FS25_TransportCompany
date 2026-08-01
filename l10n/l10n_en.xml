@@ -112,5 +112,8 @@
         <e k="transportCompany_hireNotAiFillType" v="Hired drivers cannot load these goods at this station. You can still haul it yourself."/>
         <e k="transportCompany_hireNoStation" v="This contract's pickup or drop-off station no longer exists."/>
         <e k="transportCompany_hireNoFarm" v="No farm owns this contract."/>
+        <e k="transportCompany_hireAvailable" v="Available"/>
+        <e k="transportCompany_hireUnavailable" v="Not possible"/>
+        <e k="transportCompany_hireReason" v="Reason"/>
     </elements>
 </l10n>

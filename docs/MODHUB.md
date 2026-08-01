@@ -10,10 +10,21 @@ py build.py
 py tools/modhub_check.py     # must be 0 errors
 ```
 
-> **Also run the GIANTS TestRunner** before submitting. It is a separate
-> download from the GIANTS Developer Network (developer account required) and
-> is *not* installed on this machine, so `modhub_check.py` is a stand-in, not a
-> replacement. GDN → Downloads → Farming Simulator 25 → TestRunner.
+Then run the **GIANTS TestRunner** on the same zip. It is the authority;
+`modhub_check.py` is only the fast local pass.
+
+> [!IMPORTANT]
+> **Every texture the mod references must be DDS.** The TestRunner's DXTCheck
+> looks up parsed DDS data for each referenced texture and crashes outright on
+> a PNG:
+>
+> ```
+> ERROR root - 'NoneType' object has no attribute 'header_dx10'
+>   File "modules\DXTCheck.py", line 124, in run
+> ```
+>
+> That is a hard blocker, not a warning. `modhub_check.py` now fails on any
+> non-DDS texture reference so it is caught before submitting.
 
 ---
 

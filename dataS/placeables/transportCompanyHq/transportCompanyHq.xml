@@ -5,7 +5,7 @@
         <functions>
             <function>$l10n_function_transportCompanyHq</function>
         </functions>
-        <image>textures/store_transportCompanyHq.png</image>
+        <image>textures/store_transportCompanyHq.dds</image>
         <price>25000</price>
         <dailyUpkeep>25</dailyUpkeep>
         <lifetime>1000</lifetime>
