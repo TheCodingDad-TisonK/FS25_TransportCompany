@@ -57,6 +57,13 @@ TransportCompanyContract.REWARD_PER_OBJECT = 350
 -- this is a deliberate fixed assumption rather than a lookup.
 TransportCompanyContract.LITERS_PER_PALLET = 1000
 
+-- Bumped whenever generation changes in a way that makes older saved
+-- contracts unplayable. Contracts written by an earlier generator are
+-- dropped on load rather than sitting on the board failing forever:
+-- before this existed, a save carried five jobs whose source stations
+-- could not supply them, and every hire attempt was refused.
+TransportCompanyContract.GENERATOR_VERSION = 2
+
 ---@class TransportCompanyContract
 TransportCompanyContract_mt = Class(TransportCompanyContract)
 
@@ -94,6 +101,7 @@ function TransportCompanyContract.new()
     self.isHiredDriver = false
     self.hiredDriverJobId = 0        -- base game AI job id while driving
     self.completedTime = 0
+    self.generatorVersion = TransportCompanyContract.GENERATOR_VERSION
     return self
 end
 
@@ -171,6 +179,7 @@ function TransportCompanyContract:saveToXMLFile(xmlFile, key)
     xmlFile:setBool(key .. "#isHiredDriver", self.isHiredDriver)
     xmlFile:setInt(key .. "#hiredDriverJobId", self.hiredDriverJobId or 0)
     xmlFile:setFloat(key .. "#completedTime", self.completedTime or 0)
+    xmlFile:setInt(key .. "#generatorVersion", self.generatorVersion or 0)
 end
 
 ---Load contract data from XML (instance method — populates self).
@@ -196,6 +205,8 @@ function TransportCompanyContract:loadFromXMLFile(xmlFile, key)
     self.isHiredDriver = xmlFile:getBool(key .. "#isHiredDriver", false)
     self.hiredDriverJobId = xmlFile:getInt(key .. "#hiredDriverJobId", 0)
     self.completedTime = xmlFile:getFloat(key .. "#completedTime", 0)
+    -- absent on contracts written before versioning existed
+    self.generatorVersion = xmlFile:getInt(key .. "#generatorVersion", 0)
 end
 
 ---Validate the saved station references against the live world.
@@ -464,6 +475,42 @@ function TransportCompanyContract.getStationStock(station, fillTypeIndex, farmId
         return station:getFillLevel(fillTypeIndex, farmId) or 0
     end
     return 0
+end
+
+---Count what the map can actually offer, for diagnostics.
+---@return number aiHaulable, number stockedTotal
+function TransportCompanyContract.countRoutes(farmId)
+    local storageSystem = g_currentMission ~= nil and g_currentMission.storageSystem
+    if storageSystem == nil then
+        return 0, 0
+    end
+
+    local ai, any = 0, 0
+    for station, _ in pairs(storageSystem.loadingStations) do
+        if station ~= nil and station.owningPlaceable ~= nil then
+            local fillTypes = station:getSupportedFillTypes()
+            if fillTypes ~= nil then
+                for fillTypeIndex, _ in pairs(fillTypes) do
+                    if fillTypeIndex ~= FillType.UNKNOWN then
+                        local stock = TransportCompanyContract.getStationStock(
+                            station, fillTypeIndex, farmId)
+                        if stock >= TransportCompanyContract.MIN_SOURCE_LITERS then
+                            any = any + 1
+                            local aiOk =
+                                (station.getIsFillTypeAISupported == nil
+                                 or station:getIsFillTypeAISupported(fillTypeIndex))
+                                and farmId ~= nil and farmId > 0
+                                and (station:getFillLevel(fillTypeIndex, farmId) or 0) > 0
+                            if aiOk then
+                                ai = ai + 1
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return ai, any
 end
 
 ---@param deadlineDays number|nil Deadline in game days (default 3)

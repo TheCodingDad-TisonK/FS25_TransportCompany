@@ -484,11 +484,14 @@ function TransportCompanyManager:_regenerateContractBoard()
     end
 
     if activeCount < maxActive then
-        -- Generation gave up early: usually no source station holds
-        -- enough of anything, or no destination accepts it.
+        -- Generation gave up early. Report what the map actually offers,
+        -- so an empty board can be told apart from a map with no viable
+        -- routes at all.
+        local ai, any = TransportCompanyContract.countRoutes(boardFarmId)
         TransportCompanyLog.info(
-            "board: %d/%d contracts (generation found no further route; farm %s)",
-            activeCount, maxActive, tostring(boardFarmId)
+            "board: %d/%d contracts (farm %s; %d AI-haulable sources, "
+            .. "%d stocked sources in total)",
+            activeCount, maxActive, tostring(boardFarmId), ai, any
         )
     end
 end
@@ -552,7 +555,7 @@ function TransportCompanyManager:_loadContracts()
     local xmlFile = XMLFile.load("transportCompanyContracts", filePath)
     if xmlFile == nil then return end
 
-    local loaded, dropped = 0, 0
+    local loaded, dropped, stale = 0, 0, 0
     local idx = 0
     while true do
         local key = string.format("transportCompany.contracts.contract(%d)", idx)
@@ -562,9 +565,15 @@ function TransportCompanyManager:_loadContracts()
         local contract = TransportCompanyContract.new()
         contract:loadFromXMLFile(xmlFile, key)
 
-        -- A station demolished since the last save leaves the contract
-        -- unplayable; drop it rather than keeping a dead board entry.
-        if contract:_resolveStationRefs() then
+        -- Drop anything an older generator wrote: those contracts can
+        -- reference sources that cannot supply them, and no amount of
+        -- retrying fixes that. A station demolished since the last save
+        -- is dropped for the same reason.
+        local isStale = (contract.generatorVersion or 0)
+            < TransportCompanyContract.GENERATOR_VERSION
+        if isStale then
+            stale = stale + 1
+        elseif contract:_resolveStationRefs() then
             self.contracts[contract.contractId] = contract
             loaded = loaded + 1
         else
@@ -591,8 +600,8 @@ function TransportCompanyManager:_loadContracts()
     xmlFile:delete()
 
     TransportCompanyLog.info(
-        "Loaded %d contracts (%d dropped), %d trucks from savegame",
-        loaded, dropped, truckIdx
+        "Loaded %d contracts (%d dropped, %d stale), %d trucks from savegame",
+        loaded, dropped, stale, truckIdx
     )
 end
 
@@ -1367,6 +1376,13 @@ function TransportCompanyManager:_registerConsoleCommands()
     )
 
     addConsoleCommand(
+        "tc_reset_board",
+        "Clear every contract and regenerate the dispatch board",
+        "consoleCommandResetBoard",
+        self
+    )
+
+    addConsoleCommand(
         "tc_reset_settings",
         "Reset Transport Company settings to defaults",
         "consoleCommandResetSettings",
@@ -1434,6 +1450,32 @@ function TransportCompanyManager:consoleCommandListTrucks()
         ))
     end
     print(string.format("TransportCompany: %d trucks enrolled", count))
+end
+
+---Throw the whole board away and build a fresh one. Useful after a
+---generation change, when a save still holds contracts the current
+---rules would never have produced.
+function TransportCompanyManager:consoleCommandResetBoard()
+    if not self.isServer then
+        print("TransportCompany: only the server can reset the board")
+        return
+    end
+
+    local removed = 0
+    for id, contract in pairs(self.contracts) do
+        if contract.state ~= TransportCompanyContract.STATE_COMPLETED then
+            self.contracts[id] = nil
+            removed = removed + 1
+        end
+    end
+
+    self:_regenerateContractBoard()
+
+    local now = 0
+    for _ in pairs(self.contracts) do now = now + 1 end
+    print(string.format(
+        "TransportCompany: cleared %d contract(s), board now holds %d",
+        removed, now))
 end
 
 function TransportCompanyManager:consoleCommandResetSettings()
