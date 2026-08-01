@@ -1,0 +1,4 @@
+# Build artifacts - never commit the zip (ships only as a GitHub release asset)
+*.zip
+__pycache__/
+*.pyc

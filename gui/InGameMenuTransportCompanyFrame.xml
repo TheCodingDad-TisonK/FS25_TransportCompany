@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8" standalone="no" ?>
+<GUI name="ingameMenuTransportCompany">
+	<ThreePartBitmap profile="fs25_subCategoryContainerBg">
+		<Bitmap profile="fs25_subCategoryContainerArrow"/>
+	</ThreePartBitmap>
+	<Bitmap profile="fs25_subCategoryContainer">
+		<MultiTextOption profile="fs25_subCategorySelector" id="subCategorySelector" onChange="onChangeSubCategory" focusInit="onOpen"/>
+		<BoxLayout profile="fs25_subCategorySelectorBox" id="subCategoryDotBox"/>
+		<RoundCorner profile="fs25_subCategorySelectorDot" id="subCategoryDotTemplate"/>
+		<GuiElement profile="fs25_subCategoryListContainer" id="contractsListBox">
+			<Bitmap profile="fs25_subCategoryStartClipper" name="startClipper"/>
+			<Bitmap profile="fs25_subCategoryStopClipper" name="endClipper"/>
+			<SmoothList profile="fs25_subCategoryList" id="contentList" startClipperElementName="startClipper" endClipperElementName="endClipper" emptyIndicatorId="noContractsText">
+				<ListItem profile="fs25_subCategoryListItem">
+					<Bitmap profile="fs25_subCategoryListItemIcon" name="icon" imageSize="512 512"/>
+					<Text profile="fs25_subCategoryListItemName" name="type"/>
+					<Text profile="fs25_contractsListItemTime" name="state"/>
+					<Text profile="fs25_contractsListItemReward" name="progress"/>
+					<Text profile="fs25_contractsListItemReward" name="reward"/>
+				</ListItem>
+				<ListItem profile="fs25_subCategoryListItem" name="fleetItem">
+					<Text profile="fs25_subCategoryListItemName" name="name"/>
+					<Text profile="fs25_contractsListItemReward" name="revenue"/>
+					<Text profile="fs25_contractsListItemTime" name="fuel"/>
+					<Text profile="fs25_contractsListItemReward" name="distance"/>
+					<Text profile="fs25_contractsListItemReward" name="jobs"/>
+					<Text profile="fs25_contractsListItemReward" name="profit"/>
+				</ListItem>
+				<ListItem profile="fs25_subCategoryListItem" name="ledgerItem">
+					<Text profile="fs25_subCategoryListItemName" name="label"/>
+					<Text profile="fs25_contractsListItemReward" name="value"/>
+				</ListItem>
+				<ListItem profile="fs25_subCategoryListItemEmpty" name="empty"/>
+			</SmoothList>
+			<ThreePartBitmap profile="fs25_subCategoryListSliderBox">
+				<Slider profile="fs25_listSlider" dataElementId="contentList"/>
+			</ThreePartBitmap>
+		</GuiElement>
+	</Bitmap>
+</GUI>

@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8" standalone="no" ?>
+<modDesc descVersion="106">
+    <title>Transport Company</title>
+    <description><![CDATA[
+Own and operate a trucking company.
+
+Buy the Company Headquarters from the shop and place it on your farm. The dispatch
+office opens in the PDA (in-game menu) with three sections: Dispatch, Fleet and Ledger.
+
+- Dispatch: contract board generates freight jobs from the map. Bulk contracts
+  (liters, load at a station, deliver to a destination) and pallet contracts
+  (counted objects). Accept a job, grab a truck and deliver - or hand it to a
+  hired driver, who hauls it with the base game AI.
+- Fleet: every registered truck keeps its own books - revenue, fuel cost,
+  distance and profit per truck.
+- Ledger: company totals, jobs completed and overall profit/loss.
+
+Money is paid into your farm balance with the base game finance system, all
+gameplay uses stock FS25 behaviors (hired AI, mission timers, hints, settings,
+savegame and multiplayer included).
+
+Changelog:
+v1.0.0.0 - ModHub-ready release
+    ]]></description>
+
+    <version>1.0.0.0</version>
+    <author>TisonK</author>
+    <iconFilename>textures/icon.png</iconFilename>
+    <multiplayer supported="true"/>
+
+    <storeItems>
+        <storeItem xmlFilename="dataS/placeables/transportCompanyHq/transportCompanyHq.xml"/>
+    </storeItems>
+
+    <placeableSpecializations>
+        <specialization name="transportCompanyHq" className="TransportCompanyHq" filename="scripts/placeables/TransportCompanyHq.lua"/>
+    </placeableSpecializations>
+
+    <placeableTypes>
+        <type name="transportCompanyHq" parent="simplePlaceable" filename="$dataS/scripts/placeables/Placeable.lua">
+            <specialization name="transportCompanyHq"/>
+        </type>
+    </placeableTypes>
+
+    <extraSourceFiles>
+        <sourceFile filename="scripts/transportCompany/TransportCompanyLog.lua"/>
+        <sourceFile filename="scripts/placeables/TransportCompanyHq.lua"/>
+        <sourceFile filename="scripts/transportCompany/TransportCompanySettings.lua"/>
+        <sourceFile filename="scripts/transportCompany/TransportCompanyContract.lua"/>
+        <sourceFile filename="scripts/transportCompany/TransportCompanyTruck.lua"/>
+        <sourceFile filename="scripts/transportCompany/events/TransportCompanyContractEvent.lua"/>
+        <sourceFile filename="scripts/transportCompany/events/TransportCompanyMoneyEvent.lua"/>
+        <sourceFile filename="scripts/transportCompany/TransportCompanyManager.lua"/>
+        <sourceFile filename="scripts/gui/InGameMenuTransportCompanyFrame.lua"/>
+        <sourceFile filename="scripts/TransportCompany.lua"/>
+    </extraSourceFiles>
+
+    <l10n filenamePrefix="l10n"/>
+</modDesc>

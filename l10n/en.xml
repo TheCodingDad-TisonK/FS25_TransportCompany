@@ -1,0 +1,259 @@
+<?xml version="1.0" encoding="utf-8" standalone="no" ?>
+<l10n>
+
+    <!-- ===================================================== -->
+    <!-- Store item / placeable                                 -->
+    <!-- ===================================================== -->
+    <text name="storeItem_transportCompanyHq">
+        <en>Transport Company HQ</en>
+    </text>
+    <text name="function_transportCompanyHq">
+        <en>Dispatch office</en>
+    </text>
+    <text name="transportCompany_hqPlaced">
+        <en>Transport Company HQ placed. Open the PDA (in-game menu) to reach the dispatch office.</en>
+    </text>
+    <text name="transportCompany_hqSold">
+        <en>Transport Company HQ removed. The dispatch office is no longer available.</en>
+    </text>
+
+    <!-- ===================================================== -->
+    <!-- PDA page                                               -->
+    <!-- ===================================================== -->
+    <text name="ui_transportCompanyPage">
+        <en>Transport Company</en>
+    </text>
+    <text name="transportCompany_tabDispatch">
+        <en>Dispatch</en>
+    </text>
+    <text name="transportCompany_tabFleet">
+        <en>Fleet</en>
+    </text>
+    <text name="transportCompany_tabLedger">
+        <en>Ledger</en>
+    </text>
+
+    <text name="transportCompany_dispatchTitle">
+        <en>Dispatch Board</en>
+    </text>
+    <text name="transportCompany_fleetTitle">
+        <en>Company Fleet</en>
+    </text>
+    <text name="transportCompany_ledgerTitle">
+        <en>Company Ledger</en>
+    </text>
+
+    <!-- Dispatch -->
+    <text name="transportCompany_contractListTitle">
+        <en>Available contracts</en>
+    </text>
+    <text name="transportCompany_activeContractsTitle">
+        <en>Active contracts</en>
+    </text>
+    <text name="transportCompany_contractSource">
+        <en>Load at</en>
+    </text>
+    <text name="transportCompany_contractDestination">
+        <en>Deliver to</en>
+    </text>
+    <text name="transportCompany_contractVolume">
+        <en>Volume</en>
+    </text>
+    <text name="transportCompany_contractPallets">
+        <en>Pallets</en>
+    </text>
+    <text name="transportCompany_contractReward">
+        <en>Reward</en>
+    </text>
+    <text name="transportCompany_contractDeadline">
+        <en>Deadline</en>
+    </text>
+    <text name="transportCompany_contractTruck">
+        <en>Assigned truck</en>
+    </text>
+    <text name="transportCompany_contractStatus">
+        <en>Status</en>
+    </text>
+    <text name="transportCompany_statusAvailable">
+        <en>Available</en>
+    </text>
+    <text name="transportCompany_statusAccepted">
+        <en>Accepted</en>
+    </text>
+    <text name="transportCompany_statusLoaded">
+        <en>Loaded</en>
+    </text>
+    <text name="transportCompany_statusCompleted">
+        <en>Completed</en>
+    </text>
+    <text name="transportCompany_statusExpired">
+        <en>Expired</en>
+    </text>
+    <text name="transportCompany_statusFailed">
+        <en>Failed</en>
+    </text>
+    <text name="transportCompany_noContracts">
+        <en>No contracts available right now. New jobs arrive as the days go by.</en>
+    </text>
+    <text name="transportCompany_noActiveContracts">
+        <en>No active contracts. Accept a job from the dispatch board.</en>
+    </text>
+    <text name="transportCompany_acceptContract">
+        <en>Accept contract</en>
+    </text>
+    <text name="transportCompany_acceptContractHelp">
+        <en>Accept this contract and assign a truck.</en>
+    </text>
+    <text name="transportCompany_contractTypeBulk">
+        <en>Bulk freight</en>
+    </text>
+    <text name="transportCompany_contractTypePallet">
+        <en>Pallet freight</en>
+    </text>
+    <text name="transportCompany_contractTypeUnknown">
+        <en>Unknown</en>
+    </text>
+    <text name="transportCompany_pallet">
+        <en>Pallet</en>
+    </text>
+    <text name="transportCompany_bulk">
+        <en>Bulk</en>
+    </text>
+    <text name="transportCompany_stateAvailable">
+        <en>Available</en>
+    </text>
+    <text name="transportCompany_stateAccepted">
+        <en>Accepted</en>
+    </text>
+
+    <!-- Fleet -->
+    <text name="transportCompany_fleetListTitle">
+        <en>Trucks</en>
+    </text>
+    <text name="transportCompany_fleetNoTrucks">
+        <en>No trucks registered yet. Own a truck and trailer to haul contracts.</en>
+    </text>
+    <text name="transportCompany_fleetTruckName">
+        <en>Truck</en>
+    </text>
+    <text name="transportCompany_fleetTrailer">
+        <en>Trailer</en>
+    </text>
+    <text name="transportCompany_fleetNoTrailer">
+        <en>No trailer attached</en>
+    </text>
+    <text name="transportCompany_fleetRevenue">
+        <en>Revenue</en>
+    </text>
+    <text name="transportCompany_fleetFuelCost">
+        <en>Fuel cost</en>
+    </text>
+    <text name="transportCompany_fleetDistance">
+        <en>Distance</en>
+    </text>
+    <text name="transportCompany_fleetProfit">
+        <en>Profit</en>
+    </text>
+    <text name="transportCompany_fleetJobs">
+        <en>Jobs</en>
+    </text>
+
+    <!-- Ledger -->
+    <text name="transportCompany_ledgerRevenue">
+        <en>Total revenue</en>
+    </text>
+    <text name="transportCompany_ledgerFuel">
+        <en>Fuel costs</en>
+    </text>
+    <text name="transportCompany_ledgerRepairs">
+        <en>Repairs</en>
+    </text>
+    <text name="transportCompany_ledgerProfit">
+        <en>Net profit</en>
+    </text>
+    <text name="transportCompany_ledgerJobsCompleted">
+        <en>Jobs completed</en>
+    </text>
+    <text name="transportCompany_ledgerTrucks">
+        <en>Registered trucks</en>
+    </text>
+    <text name="transportCompany_ledgerActiveJobs">
+        <en>Active jobs</en>
+    </text>
+    <text name="transportCompany_totalRevenue">
+        <en>Total revenue</en>
+    </text>
+    <text name="transportCompany_totalFuel">
+        <en>Total fuel</en>
+    </text>
+    <text name="transportCompany_totalDistance">
+        <en>Total distance</en>
+    </text>
+    <text name="transportCompany_totalJobs">
+        <en>Total jobs</en>
+    </text>
+    <text name="transportCompany_totalProfit">
+        <en>Net profit</en>
+    </text>
+
+    <!-- ===================================================== -->
+    <!-- Notifications                                          -->
+    <!-- ===================================================== -->
+    <text name="transportCompany_contractAccepted">
+        <en>Contract accepted: %s (%s) - %s</en>
+    </text>
+    <text name="transportCompany_contractDelivered">
+        <en>Contract completed: %s - reward %s</en>
+    </text>
+    <text name="transportCompany_contractExpired">
+        <en>Contract expired: %s</en>
+    </text>
+    <text name="transportCompany_contractCancelled">
+        <en>Contract cancelled: %s</en>
+    </text>
+    <text name="transportCompany_noTruck">
+        <en>No suitable truck found for this contract.</en>
+    </text>
+    <text name="transportCompany_truckNotAttached">
+        <en>Attach a trailer to your truck before dispatching.</en>
+    </text>
+    <text name="transportCompany_driverDispatched">
+        <en>Driver dispatched: %s is hauling %s.</en>
+    </text>
+
+    <!-- ===================================================== -->
+    <!-- Settings (savegame-side, shared)                       -->
+    <!-- ===================================================== -->
+    <text name="transportCompany_settingsContractDensity">
+        <en>Contract density</en>
+    </text>
+    <text name="transportCompany_settingsRewardMultiplier">
+        <en>Reward multiplier</en>
+    </text>
+    <text name="transportCompany_settingsDeadlineMultiplier">
+        <en>Deadline multiplier</en>
+    </text>
+    <text name="transportCompany_settingsUseAI">
+        <en>Allow hired drivers</en>
+    </text>
+
+    <!-- ===================================================== -->
+    <!-- Hints                                                  -->
+    <!-- ===================================================== -->
+    <text name="transportCompany_hintTitle">
+        <en>Transport Company</en>
+    </text>
+    <text name="transportCompany_hintIntro">
+        <en>You now run a transport company. Open the PDA and use the Transport Company page to accept freight contracts, dispatch your trucks and track your profit.</en>
+    </text>
+    <text name="transportCompany_gameplayHint">
+        <en>Transport Company: accept freight contracts from the dispatch board in the PDA. Trucks earn revenue per job and fuel costs are charged to the truck's ledger. A truck is any vehicle classified as a truck in the base game; it needs a trailer to haul bulk or pallet freight.</en>
+    </text>
+    <text name="transportCompany_hint_dispatch">
+        <en>Transport Company: accept freight contracts from the dispatch board in the PDA. Assign a truck or hire a driver to haul the load.</en>
+    </text>
+    <text name="transportCompany_hint_fleet">
+        <en>Transport Company: your fleet's revenue, fuel costs, and profit are tracked per truck in the Fleet and Ledger tabs of the dispatch office.</en>
+    </text>
+
+</l10n>

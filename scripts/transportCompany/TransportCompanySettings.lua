@@ -1,0 +1,313 @@
+-- =========================================================
+-- FS25 Transport Company - Settings
+-- =========================================================
+-- Single source of truth for all Transport Company settings.
+--
+-- Server-shared settings (contract board size, deadline length,
+-- notifications) are saved into the server savegame directory so
+-- every player in a multiplayer game uses the same company rules.
+--
+-- Local-only settings (debug output) are saved per-player into the
+-- user profile (modSettings/FS25_TransportCompany/...) so they
+-- survive reconnects on dedicated servers.
+--
+-- Mirror of the proven SettingsSchema/SettingsManager pattern used
+-- by the user's other FS25 mods; consolidated into one file because
+-- the Transport Company surface is small.
+--
+-- Ground truth:
+--   - g_currentMission.missionInfo.savegameDirectory is the per-save
+--     server directory (FSCareerMissionInfo) - server-shared config
+--     belongs next to the savegame.
+--   - getUserProfileAppPath() + createFolder() are the profile helpers
+--     used for per-player files (base game user profile layout).
+--   - Only the server writes the server-shared file (g_server present
+--     or singleplayer: g_client ~= nil and g_server == nil means a
+--     client-only process; it must NOT write).
+-- =========================================================
+
+local modName = g_currentModName or "FS25_TransportCompany"
+
+---@class TransportCompanySettings
+TransportCompanySettings = {}
+local TransportCompanySettings_mt = Class(TransportCompanySettings)
+
+-- XML root tag inside the savegame-side config file.
+TransportCompanySettings.XMLTAG = "transportCompanyConfig"
+
+-- ── Schema ──────────────────────────────────────────────────
+-- Each entry fully describes one setting.
+--   type      : "boolean" | "number"
+--   default   : fallback value
+--   localOnly : true  -> per-player, saved in profile (never synced)
+--               false -> server-shared, saved next to the savegame
+TransportCompanySettings.definitions = {
+    {
+        id = "enabled",
+        type = "boolean",
+        default = true,
+        -- Master switch for the whole company. When disabled, the
+        -- dispatch office shows "Company is closed", no contracts are
+        -- generated and no truck keeps books.
+    },
+    {
+        id = "maxActiveContracts",
+        type = "number",
+        default = 5,
+        min = 1,
+        max = 12,
+        -- How many open contracts the dispatch board holds at once.
+        -- New contracts are generated when a slot frees up (delivered,
+        -- expired or declined).
+    },
+    {
+        id = "contractDeadlineDays",
+        type = "number",
+        default = 7,
+        min = 1,
+        max = 30,
+        -- Deadline for accepted contracts, in game days. The in-game
+        -- clock (g_currentMission.time, 86400000 ms per day) drives
+        -- the deadline; the base game mission timers show the countdown.
+    },
+    {
+        id = "hiredDriverRewardShare",
+        type = "number",
+        default = 20,
+        min = 0,
+        max = 100,
+        -- Percent of the contract reward a hired driver (AI job) keeps
+        -- for themselves. The company bank receives the rest. 0 means
+        -- drivers haul for free (only the vehicle running costs count).
+    },
+    {
+        id = "showNotifications",
+        type = "boolean",
+        default = true,
+        -- Show base-game style ingame notifications (contract accepted,
+        -- delivered, expired, new board, ...). When off, the company
+        -- still runs - it just keeps quiet.
+    },
+    {
+        id = "debugMode",
+        type = "boolean",
+        default = false,
+        localOnly = true,
+        -- Verbose log output for development. Never on by default; the
+        -- built zip ships with this false (ModHub gate).
+    },
+}
+
+-- Build lookup + helpers -----------------------------------------------------
+
+TransportCompanySettings.byId = {}
+for _, def in ipairs(TransportCompanySettings.definitions) do
+    TransportCompanySettings.byId[def.id] = def
+end
+
+function TransportCompanySettings.getDefault(id)
+    local def = TransportCompanySettings.byId[id]
+    if def ~= nil then
+        -- Explicit return so boolean defaults of false stay false.
+        return def.default
+    end
+    return nil
+end
+
+function TransportCompanySettings.getAllDefaults()
+    local defaults = {}
+    for _, def in ipairs(TransportCompanySettings.definitions) do
+        defaults[def.id] = def.default
+    end
+    return defaults
+end
+
+--- Validate a value against its schema entry.
+--- Returns the validated value, or nil when the setting is unknown.
+function TransportCompanySettings.validate(id, value)
+    local def = TransportCompanySettings.byId[id]
+    if def == nil then
+        return nil
+    end
+    if def.type == "boolean" then
+        return not not value
+    elseif def.type == "number" then
+        value = tonumber(value)
+        if value == nil then
+            return def.default
+        end
+        if def.min ~= nil and value < def.min then return def.min end
+        if def.max ~= nil and value > def.max then return def.max end
+        return value
+    end
+    return value
+end
+
+-- ── Instance ────────────────────────────────────────────────
+
+function TransportCompanySettings.new()
+    local self = setmetatable({}, TransportCompanySettings_mt)
+    self:resetToDefaults()
+    return self
+end
+
+function TransportCompanySettings:resetToDefaults()
+    self.config = TransportCompanySettings.getAllDefaults()
+end
+
+function TransportCompanySettings:get(id)
+    return self.config[id]
+end
+
+function TransportCompanySettings:set(id, value)
+    local def = TransportCompanySettings.byId[id]
+    if def == nil then
+        return false
+    end
+    local validated = TransportCompanySettings.validate(id, value)
+    self.config[id] = validated
+    return true
+end
+
+-- ── Paths ───────────────────────────────────────────────────
+
+--- Server-shared config path: next to the current savegame.
+--- Returns nil before the savegame directory exists (new career).
+function TransportCompanySettings:getSavegameXmlFilePath()
+    local missionInfo = g_currentMission ~= nil and g_currentMission.missionInfo
+    if missionInfo ~= nil and missionInfo.savegameDirectory ~= nil then
+        return string.format("%s/%s.xml", missionInfo.savegameDirectory, modName)
+    end
+    return nil
+end
+
+--- Local-only config path: user profile modSettings folder.
+--- Falls back to the savegame dir with a _local suffix in
+--- singleplayer/self-hosted (mirrors the reference pattern).
+function TransportCompanySettings:getLocalSettingsPath()
+    local ok, profilePath = pcall(getUserProfileAppPath)
+    if ok and profilePath ~= nil and profilePath ~= "" then
+        if profilePath:sub(-1) ~= "/" and profilePath:sub(-1) ~= "\\" then
+            profilePath = profilePath .. "/"
+        end
+        local base = profilePath .. "modSettings/" .. modName
+        pcall(createFolder, profilePath .. "modSettings")
+        pcall(createFolder, base)
+        pcall(createFolder, base .. "/Settings")
+        return base .. "/Settings/local.xml"
+    end
+    local xmlPath = self:getSavegameXmlFilePath()
+    if xmlPath ~= nil then
+        return xmlPath:gsub("%.xml$", "_local.xml")
+    end
+    return nil
+end
+
+-- ── Load / save ─────────────────────────────────────────────
+
+function TransportCompanySettings:loadSettings()
+    self:resetToDefaults()
+
+    -- Server-shared part
+    local xmlPath = self:getSavegameXmlFilePath()
+    if xmlPath ~= nil and fileExists(xmlPath) then
+        local xml = XMLFile.load(modName .. "_Config", xmlPath)
+        if xml ~= nil then
+            for _, def in ipairs(TransportCompanySettings.definitions) do
+                if not def.localOnly then
+                    local key = self.XMLTAG .. "." .. def.id
+                    if def.type == "boolean" then
+                        self.config[def.id] = xml:getBool(key, def.default)
+                    elseif def.type == "number" then
+                        self.config[def.id] = xml:getInt(key, def.default)
+                    end
+                end
+            end
+            xml:delete()
+        end
+    end
+
+    -- Local-only part
+    local localPath = self:getLocalSettingsPath()
+    if localPath ~= nil and fileExists(localPath) then
+        local xml = XMLFile.load(modName .. "_LocalConfig", localPath)
+        if xml ~= nil then
+            for _, def in ipairs(TransportCompanySettings.definitions) do
+                if def.localOnly then
+                    local key = self.XMLTAG .. "." .. def.id
+                    if def.type == "boolean" then
+                        self.config[def.id] = xml:getBool(key, def.default)
+                    elseif def.type == "number" then
+                        self.config[def.id] = xml:getInt(key, def.default)
+                    end
+                end
+            end
+            xml:delete()
+        end
+    end
+end
+
+--- Save server-shared settings. Server / singleplayer only.
+function TransportCompanySettings:saveSettings()
+    local xmlPath = self:getSavegameXmlFilePath()
+    if xmlPath == nil then
+        return false
+    end
+    -- Client-only processes must not write the shared file.
+    if g_client ~= nil and g_server == nil then
+        return false
+    end
+    if not fileExists(xmlPath) then
+        -- Savegame dir may not exist yet on a fresh dedicated server.
+        local dir = xmlPath:match("^(.*)[/\\][^/\\]+%.xml$")
+        if dir ~= nil and not fileExists(dir) then
+            local okCreate = pcall(createFolder, dir)
+            if not okCreate then
+                return false
+            end
+        end
+    end
+
+    local xml = XMLFile.create(modName .. "_Config", xmlPath, self.XMLTAG)
+    if xml == nil then
+        return false
+    end
+    for _, def in ipairs(TransportCompanySettings.definitions) do
+        if not def.localOnly then
+            local key = self.XMLTAG .. "." .. def.id
+            if def.type == "boolean" then
+                xml:setBool(key, self.config[def.id])
+            elseif def.type == "number" then
+                xml:setInt(key, self.config[def.id])
+            end
+        end
+    end
+    xml:save()
+    xml:delete()
+    return true
+end
+
+--- Save local-only settings (per-player profile).
+function TransportCompanySettings:saveLocalSettings()
+    local path = self:getLocalSettingsPath()
+    if path == nil then
+        return false
+    end
+    local xml = XMLFile.create(modName .. "_LocalConfig", path, self.XMLTAG)
+    if xml == nil then
+        return false
+    end
+    for _, def in ipairs(TransportCompanySettings.definitions) do
+        if def.localOnly then
+            local key = self.XMLTAG .. "." .. def.id
+            if def.type == "boolean" then
+                xml:setBool(key, self.config[def.id])
+            elseif def.type == "number" then
+                xml:setInt(key, self.config[def.id])
+            end
+        end
+    end
+    xml:save()
+    xml:delete()
+    return true
+end
