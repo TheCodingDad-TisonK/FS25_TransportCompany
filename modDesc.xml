@@ -1,33 +1,56 @@
 <?xml version="1.0" encoding="utf-8" standalone="no" ?>
-<modDesc descVersion="106">
+<modDesc descVersion="111">
     <title>
         <en>Transport Company</en>
     </title>
-    <description><![CDATA[
+    <description>
+        <en><![CDATA[
 Own and operate a trucking company.
 
-Buy the Company Headquarters from the shop and place it on your farm. The dispatch
-office opens in the PDA (in-game menu) with three sections: Dispatch, Fleet and Ledger.
+Your map is already full of silos, dairies and mills moving goods between them.
+None of it pays you a penny. Buy a headquarters and it does.
 
-- Dispatch: contract board generates freight jobs from the map. Bulk contracts
-  (liters, load at a station, deliver to a destination) and pallet contracts
-  (counted objects). Accept a job, grab a truck and deliver - or hand it to a
-  hired driver, who hauls it with the base game AI.
-- Fleet: every registered truck keeps its own books - revenue, fuel cost,
-  distance and profit per truck.
-- Ledger: company totals, jobs completed and overall profit/loss.
+Buy the Transport Company HQ from the shop (Buildings > Sheds) and place it on
+your farm. The dispatch office opens in the in-game menu with four sections:
+Dispatch, Fleet, Ledger and Settings.
 
-Money is paid into your farm balance with the base game finance system, all
-gameplay uses stock FS25 behaviors (hired AI, mission timers, hints, settings,
-savegame and multiplayer included).
+Freight jobs are generated from the loading and unloading stations that already
+exist on your map, priced against the live economy. Every job names its pickup,
+its drop-off, the amount, the reward and the deadline. Haul one yourself, or
+hand the route to a hired driver and let the base game AI run it.
 
-Changelog:
-v1.0.0.0 - ModHub-ready release
-    ]]></description>
+Every truck keeps its own books: distance driven, diesel burned at the live
+economy price, revenue earned, wages paid and jobs completed. The ledger keeps
+company totals and a history of every finished contract.
+
+No map preparation of any kind is required.
+        ]]></en>
+        <de><![CDATA[
+Fuehre dein eigenes Transportunternehmen.
+
+Auf deiner Karte bewegen Silos, Molkereien und Muehlen laengst Waren hin und
+her - nur verdienst du keinen Cent daran. Mit einer eigenen Zentrale aendert
+sich das.
+
+Kaufe die Transportunternehmen-Zentrale beim Haendler (Gebaeude > Hallen) und
+stelle sie auf deinem Hof auf. Die Disposition oeffnet sich im Spielmenue und
+hat vier Bereiche: Disposition, Fuhrpark, Buchhaltung und Einstellungen.
+
+Frachtauftraege werden aus den Lade- und Abladestellen erzeugt, die es auf
+deiner Karte ohnehin gibt, bewertet nach den aktuellen Wirtschaftspreisen.
+Jeder Auftrag nennt Ladestation, Abladestelle, Menge, Vertragswert und Frist.
+Fahre selbst oder uebergib die Route einem angestellten Fahrer.
+
+Jeder LKW fuehrt eigene Buecher: Fahrstrecke, verbrauchter Diesel zum aktuellen
+Preis, Einnahmen, Loehne und abgeschlossene Auftraege.
+
+Es ist keinerlei Vorbereitung der Karte noetig.
+        ]]></de>
+    </description>
 
     <version>1.0.0.0</version>
     <author>TisonK</author>
-    <iconFilename>textures/icon.dds</iconFilename>
+    <iconFilename>textures/icon_FS25_TransportCompany.dds</iconFilename>
     <multiplayer supported="true"/>
 
     <!-- Register the brand so the shop stops falling back to LIZARD -->

@@ -87,8 +87,11 @@ def main():
     dv = root.get("descVersion")
     if dv is None or not dv.isdigit():
         err("modDesc descVersion missing")
-    elif not (90 <= int(dv) <= 111):
-        err("descVersion %s outside the accepted 90-111 (main.lua:29-30)" % dv)
+    elif int(dv) != 111:
+        # The engine loads 90-111 (main.lua:29-30) but the TestRunner
+        # pins ModHub submissions to the current version exactly:
+        # "invalid desc version ... min: 111 max: 111".
+        err("descVersion %s -- ModHub requires exactly 111" % dv)
     else:
         ok("descVersion %s" % dv)
 
@@ -161,6 +164,57 @@ def main():
                     ok("icon %s %dx%d PNG" % (icon, w, h))
                 warn("icon is PNG; the engine logs 'raw format' and generates "
                      "mips on the CPU. DDS is preferred.")
+
+    # --- TestRunner naming and format rules --------------------------
+    if icon and not icon.endswith("icon_%s.dds" % MOD_NAME):
+        err("mod icon %s must be named icon_%s.dds "
+            "(TestRunner 'mod icon name')" % (icon, MOD_NAME))
+    elif icon:
+        ok("mod icon follows the icon_<modName>.dds convention")
+
+    # a storeIcon must be 512x512 BC7_UNORM, not a DXT format
+    store_icons = set()
+    for n in names:
+        if n.endswith(".xml"):
+            body = z.read(n).decode("utf-8-sig", "replace")
+            for m in re.finditer(r"<image>([^<]+)</image>", body):
+                store_icons.add(m.group(1).strip())
+    for si in sorted(store_icons):
+        if si not in names:
+            continue
+        d = z.read(si)
+        info = dds_info(d)
+        if info is None:
+            err("store icon %s is not DDS" % si)
+            continue
+        w, h, mips, fourcc = info
+        if (w, h) != (512, 512):
+            err("store icon %s is %dx%d -- must be 512x512" % (si, w, h))
+        elif fourcc != "DX10" or struct.unpack("<I", d[128:132])[0] != 98:
+            err("store icon %s is %s -- must be BC7_UNORM" % (si, fourcc))
+        else:
+            ok("store icon %s 512x512 BC7_UNORM" % si)
+
+    for node in root.iter("brand"):
+        bi = node.get("image")
+        if bi and bi in names:
+            info = dds_info(z.read(bi))
+            if info and (info[0], info[1]) != (512, 256):
+                err("brand icon %s is %dx%d -- must be 512x256"
+                    % (bi, info[0], info[1]))
+            elif info:
+                ok("brand icon %s 512x256" % bi)
+
+    ALLOWED = {"xml", "lua", "dds", "i3d", "shapes", "anim", "ogg", "wav",
+               "gls", "ogv", "gdm", "grle", "cache"}
+    bad_ext = sorted(n for n in names
+                     if "." not in n.rsplit("/", 1)[-1]
+                     or n.rsplit(".", 1)[-1].lower() not in ALLOWED)
+    if bad_ext:
+        err("files the TestRunner rejects as source/unsupported: %s"
+            % ", ".join(bad_ext[:5]))
+    else:
+        ok("every shipped file uses an allowed extension")
 
     # --- localisation ------------------------------------------------
     l10n = root.find("l10n")

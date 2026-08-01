@@ -152,6 +152,117 @@ def save_auto(img, path):
     return save_dxt1(rgba, path), "DXT1"
 
 
+# --- BC7 -------------------------------------------------------------
+# The TestRunner requires BC7_UNORM for store icons ("uses: DXT1,
+# requires: BC7_UNORM, used as: storeIcon"). Only mode 6 is implemented:
+# one subset, RGBA endpoints at 7 bits plus a p-bit, 4-bit indices. That
+# is the simplest BC7 mode and is a good fit for flat vector artwork,
+# where a single colour line through the block is all a 4x4 needs.
+#
+# Block layout, LSB-first: mode(7) R0 R1 G0 G1 B0 B1 A0 A1 (7 each)
+# P0 P1 (1 each) then 16 indices, the first of which is 3 bits because
+# its high bit is implicitly zero. 7 + 56 + 2 + 63 = 128.
+BC7_WEIGHTS4 = (0, 4, 9, 13, 17, 21, 26, 30, 34, 38, 43, 47, 51, 55, 60, 64)
+
+DXGI_FORMAT_BC7_UNORM = 98
+DDPF_FOURCC_DX10 = b"DX10"
+
+
+class _Bits:
+    def __init__(self):
+        self.v = 0
+        self.n = 0
+
+    def put(self, value, count):
+        self.v |= (value & ((1 << count) - 1)) << self.n
+        self.n += count
+
+    def out(self):
+        assert self.n == 128, self.n
+        return self.v.to_bytes(16, "little")
+
+
+def _quantise(vals):
+    """Pick the 7-bit value plus shared p-bit that best fits an endpoint."""
+    best, best_err = None, None
+    for p in (0, 1):
+        q, err = [], 0
+        for v in vals:
+            qi = max(0, min(127, (v - p + 1) >> 1))
+            q.append(qi)
+            err += (((qi << 1) | p) - v) ** 2
+        if best_err is None or err < best_err:
+            best, best_err = (q, p), err
+    return best
+
+
+def _bc7_block(px, bx, by, w, h):
+    cols = []
+    for y in range(4):
+        for x in range(4):
+            cols.append(px[min(bx + x, w - 1), min(by + y, h - 1)])
+
+    lo = [min(c[i] for c in cols) for i in range(4)]
+    hi = [max(c[i] for c in cols) for i in range(4)]
+
+    (q0, p0) = _quantise(lo)
+    (q1, p1) = _quantise(hi)
+    e0 = [(v << 1) | p0 for v in q0]
+    e1 = [(v << 1) | p1 for v in q1]
+
+    pal = []
+    for wgt in BC7_WEIGHTS4:
+        pal.append(tuple((e0[i] * (64 - wgt) + e1[i] * wgt + 32) >> 6
+                         for i in range(4)))
+
+    idx = []
+    for c in cols:
+        best, bestd = 0, None
+        for j, pc in enumerate(pal):
+            d = sum((c[i] - pc[i]) ** 2 for i in range(4))
+            if bestd is None or d < bestd:
+                best, bestd = j, d
+        idx.append(best)
+
+    # The anchor index carries no high bit, so it must be < 8. If it is
+    # not, swap the endpoints and mirror every index.
+    if idx[0] >= 8:
+        q0, p0, q1, p1 = q1, p1, q0, p0
+        idx = [15 - i for i in idx]
+
+    b = _Bits()
+    b.put(64, 7)                       # mode 6
+    for ch in range(4):                # R0 R1 G0 G1 B0 B1 A0 A1
+        b.put(q0[ch], 7)
+        b.put(q1[ch], 7)
+    b.put(p0, 1)
+    b.put(p1, 1)
+    b.put(idx[0], 3)
+    for i in idx[1:]:
+        b.put(i, 4)
+    return b.out()
+
+
+def save_bc7(img, path):
+    """BC7_UNORM via the DX10 extended header. Required for store icons."""
+    img = img.convert("RGBA")
+    w, h = img.size
+    assert w % 4 == 0 and h % 4 == 0, "BC7 needs multiples of 4"
+    px = img.load()
+
+    data = bytearray()
+    for by in range(0, h, 4):
+        for bx in range(0, w, 4):
+            data += _bc7_block(px, bx, by, w, h)
+
+    header = bytearray(_header(w, h, len(data), DDPF_FOURCC_DX10))
+    header += struct.pack("<5I", DXGI_FORMAT_BC7_UNORM, 3, 0, 1, 0)
+    with open(path, "wb") as f:
+        f.write(header)
+        f.write(data)
+    return len(header) + len(data)
+
+
 def save_dxt1(img, path):
     img = img.convert("RGB")
     w, h = img.size

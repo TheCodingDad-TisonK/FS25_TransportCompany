@@ -11,6 +11,8 @@
         <lifetime>1000</lifetime>
         <rotation>0</rotation>
         <brand>TISONK</brand>
+        <canBeRenamed>true</canBeRenamed>
+        <boughtWithFarmland>false</boughtWithFarmland>
         <species>PLACEABLE</species>
         <category>sheds</category>
         <brush>

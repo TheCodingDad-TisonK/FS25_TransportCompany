@@ -202,7 +202,8 @@ def on_bg(art, size, pad):
 
 
 MOD = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-STORE = on_bg(render_depot(), 256, 18)
+# storeIcon must be 512x512 (TestRunner storeIconResolution)
+STORE = on_bg(render_depot(), 512, 36)
 TAB = squarePad(render_tab()).resize((128, 128), Image.LANCZOS)
 
 
@@ -221,8 +222,14 @@ art.save(MOD + "/icon_source.png")
 # parsed DDS data for each texture a mod references and crashes on a PNG
 # ("'NoneType' object has no attribute 'header_dx10'"), so a single PNG
 # left behind is a hard ModHub blocker.
-for image, name in ((on_bg(art, 512, 40), "icon"),
-                    (STORE, "store_transportCompanyHq"),
+from dds import save_bc7
+
+# The mod icon must be named icon_<modName>.dds (TestRunner "mod icon
+# name"), and a storeIcon must be BC7_UNORM at 512x512, not DXT1.
+for image, name in ((on_bg(art, 512, 40), "icon_FS25_TransportCompany"),
                     (TAB, "tab_transportCompany")):
     size, fmt = save_auto(image, "%s/textures/%s.dds" % (MOD, name))
     print("wrote textures/%s.dds (%s, %d KB)" % (name, fmt, size // 1024))
+
+size = save_bc7(STORE, MOD + "/textures/store_transportCompanyHq.dds")
+print("wrote textures/store_transportCompanyHq.dds (BC7_UNORM, %d KB)" % (size // 1024))
