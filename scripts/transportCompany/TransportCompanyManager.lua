@@ -98,12 +98,24 @@ function TransportCompanyManager:load()
         end
     )
 
+    -- Per-frame update (for truck sampling, deadline checks)
+    FSBaseMission.update = Utils.appendedFunction(
+        FSBaseMission.update,
+        function(mission, dt)
+            if g_transportCompanyManager then
+                g_transportCompanyManager:update(dt)
+            end
+        end
+    )
+
     -- Save hook: persist contracts when the game saves
     if FSCareerMissionInfo and FSCareerMissionInfo.saveToXMLFile then
         FSCareerMissionInfo.saveToXMLFile = Utils.appendedFunction(
             FSCareerMissionInfo.saveToXMLFile,
             function()
-                self:_saveContracts()
+                if g_transportCompanyManager then
+                    g_transportCompanyManager:_saveContracts()
+                end
             end
         )
     end
@@ -125,7 +137,7 @@ function TransportCompanyManager:_onMissionLoaded()
     self.isServer = g_server ~= nil
 
     -- Load settings (shared + local)
-    self.settings:load()
+    self.settings:loadSettings()
 
     -- Restore contracts from savegame (if any)
     self:_loadContracts()
