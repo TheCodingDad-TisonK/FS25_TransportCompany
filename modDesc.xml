@@ -58,5 +58,5 @@ v1.0.0.0 - ModHub-ready release
         <sourceFile filename="scripts/TransportCompany.lua"/>
     </extraSourceFiles>
 
-    <l10n filenamePrefix="l10n/"/>
+    <l10n filenamePrefix="l10n/l10n"/>
 </modDesc>

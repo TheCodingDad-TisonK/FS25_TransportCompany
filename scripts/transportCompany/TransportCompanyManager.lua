@@ -283,7 +283,14 @@ function TransportCompanyManager:_registerPdaPage()
         -- InGameMenu does it by hand for each of its own pages
         -- (InGameMenu.lua:203-223), so a mod page must do the same or
         -- its element references stay nil.
-        screen:initialize()
+        --
+        -- Guarded separately: an error in here used to abort the whole
+        -- registration below it, so the tab never appeared at all. A
+        -- half-populated page is still far better than no page.
+        local initOk, initErr = pcall(screen.initialize, screen)
+        if not initOk then
+            TransportCompanyLog.error("PDA frame initialize failed: %s", tostring(initErr))
+        end
 
         -- Add to the paging element (avoid duplicates)
         if inGameMenu.pagingElement ~= nil then

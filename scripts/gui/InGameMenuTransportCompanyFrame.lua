@@ -299,9 +299,33 @@ function InGameMenuTransportCompanyFrame:getNumberOfItemsInSection(list, section
     return #self.rows
 end
 
+---Cell layout for a row.
+---
+---This must ALWAYS name a ListItem that exists in the XML, even when
+---the list is empty. buildSectionInfo calls getWidthOfItemFast(1, 1)
+---before it ever asks how many items there are
+---(SmoothListElement.lua:400), and that resolves the cell type and
+---immediately dereferences cellDatabase[name].size
+---(SmoothListElement.lua:536). Returning nil for a missing row indexed
+---the database with nil and threw "attempt to index nil with 'size'",
+---which aborted PDA page registration entirely — the tab never
+---appeared in game.
 function InGameMenuTransportCompanyFrame:getCellTypeForItemInSection(list, section, index)
     local row = self.rows[index]
-    return row ~= nil and row.cellName or nil
+    if row ~= nil and row.cellName ~= nil then
+        return row.cellName
+    end
+    return self:_defaultCellName()
+end
+
+---The cell layout the current tab uses, for probes against an empty list.
+function InGameMenuTransportCompanyFrame:_defaultCellName()
+    if self.currentTab == InGameMenuTransportCompanyFrame.TAB_FLEET then
+        return "fleetItem"
+    elseif self.currentTab == InGameMenuTransportCompanyFrame.TAB_LEDGER then
+        return "ledgerItem"
+    end
+    return "contractItem"
 end
 
 function InGameMenuTransportCompanyFrame:populateCellForItemInSection(list, section, index, cell)

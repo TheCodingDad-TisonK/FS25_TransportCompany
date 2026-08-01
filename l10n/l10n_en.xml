@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8" standalone="no" ?>
+<l10n>
+    <elements>
+        <e k="storeItem_transportCompanyHq" v="Transport Company HQ"/>
+        <e k="function_transportCompanyHq" v="Dispatch office"/>
+        <e k="transportCompany_hqPlaced" v="Transport Company HQ placed. Open the PDA (in-game menu) to reach the dispatch office."/>
+        <e k="transportCompany_hqSold" v="Transport Company HQ removed. The dispatch office is no longer available."/>
+        <e k="ui_transportCompanyPage" v="Transport Company"/>
+        <e k="transportCompany_tabDispatch" v="Dispatch"/>
+        <e k="transportCompany_tabFleet" v="Fleet"/>
+        <e k="transportCompany_tabLedger" v="Ledger"/>
+        <e k="transportCompany_dispatchTitle" v="Dispatch Board"/>
+        <e k="transportCompany_fleetTitle" v="Company Fleet"/>
+        <e k="transportCompany_ledgerTitle" v="Company Ledger"/>
+        <e k="transportCompany_contractListTitle" v="Available contracts"/>
+        <e k="transportCompany_activeContractsTitle" v="Active contracts"/>
+        <e k="transportCompany_contractSource" v="Load at"/>
+        <e k="transportCompany_contractDestination" v="Deliver to"/>
+        <e k="transportCompany_contractVolume" v="Volume"/>
+        <e k="transportCompany_contractPallets" v="Pallets"/>
+        <e k="transportCompany_contractReward" v="Reward"/>
+        <e k="transportCompany_contractDeadline" v="Deadline"/>
+        <e k="transportCompany_contractTruck" v="Assigned truck"/>
+        <e k="transportCompany_contractStatus" v="Status"/>
+        <e k="transportCompany_statusAvailable" v="Available"/>
+        <e k="transportCompany_statusAccepted" v="Accepted"/>
+        <e k="transportCompany_statusLoaded" v="Loaded"/>
+        <e k="transportCompany_statusCompleted" v="Completed"/>
+        <e k="transportCompany_statusExpired" v="Expired"/>
+        <e k="transportCompany_statusFailed" v="Failed"/>
+        <e k="transportCompany_noContracts" v="No contracts available right now. New jobs arrive as the days go by."/>
+        <e k="transportCompany_noActiveContracts" v="No active contracts. Accept a job from the dispatch board."/>
+        <e k="transportCompany_acceptContract" v="Accept contract"/>
+        <e k="transportCompany_hireDriver" v="Hire driver"/>
+        <e k="transportCompany_acceptContractHelp" v="Accept this contract and assign a truck."/>
+        <e k="transportCompany_contractTypeBulk" v="Bulk freight"/>
+        <e k="transportCompany_contractTypePallet" v="Pallet freight"/>
+        <e k="transportCompany_contractTypeUnknown" v="Unknown"/>
+        <e k="transportCompany_pallet" v="Pallet"/>
+        <e k="transportCompany_bulk" v="Bulk"/>
+        <e k="transportCompany_stateAvailable" v="Available"/>
+        <e k="transportCompany_stateAccepted" v="Accepted"/>
+        <e k="transportCompany_unitObjects" v="pcs"/>
+        <e k="transportCompany_fleetListTitle" v="Trucks"/>
+        <e k="transportCompany_fleetNoTrucks" v="No trucks registered yet. Own a truck and trailer to haul contracts."/>
+        <e k="transportCompany_fleetTruckName" v="Truck"/>
+        <e k="transportCompany_fleetTrailer" v="Trailer"/>
+        <e k="transportCompany_fleetNoTrailer" v="No trailer attached"/>
+        <e k="transportCompany_fleetRevenue" v="Revenue"/>
+        <e k="transportCompany_fleetFuelCost" v="Fuel cost"/>
+        <e k="transportCompany_fleetDistance" v="Distance"/>
+        <e k="transportCompany_fleetProfit" v="Profit"/>
+        <e k="transportCompany_fleetJobs" v="Jobs"/>
+        <e k="transportCompany_ledgerRevenue" v="Total revenue"/>
+        <e k="transportCompany_ledgerFuel" v="Fuel costs"/>
+        <e k="transportCompany_ledgerRepairs" v="Repairs"/>
+        <e k="transportCompany_ledgerProfit" v="Net profit"/>
+        <e k="transportCompany_ledgerJobsCompleted" v="Jobs completed"/>
+        <e k="transportCompany_ledgerTrucks" v="Registered trucks"/>
+        <e k="transportCompany_ledgerActiveJobs" v="Active jobs"/>
+        <e k="transportCompany_totalRevenue" v="Total revenue"/>
+        <e k="transportCompany_totalFuel" v="Total fuel"/>
+        <e k="transportCompany_totalDistance" v="Total distance"/>
+        <e k="transportCompany_totalJobs" v="Total jobs"/>
+        <e k="transportCompany_totalWages" v="Driver wages"/>
+        <e k="transportCompany_totalProfit" v="Net profit"/>
+        <e k="transportCompany_contractAccepted" v="Contract accepted: %s (%s) - %s"/>
+        <e k="transportCompany_contractDelivered" v="Contract completed: %s - reward %s"/>
+        <e k="transportCompany_contractExpired" v="Contract expired: %s"/>
+        <e k="transportCompany_contractCancelled" v="Contract cancelled: %s"/>
+        <e k="transportCompany_noTruck" v="No suitable truck found for this contract."/>
+        <e k="transportCompany_truckNotAttached" v="Attach a trailer to your truck before dispatching."/>
+        <e k="transportCompany_driverDispatched" v="Driver dispatched: %s is hauling %s."/>
+        <e k="transportCompany_settingsContractDensity" v="Contract density"/>
+        <e k="transportCompany_settingsRewardMultiplier" v="Reward multiplier"/>
+        <e k="transportCompany_settingsDeadlineMultiplier" v="Deadline multiplier"/>
+        <e k="transportCompany_settingsUseAI" v="Allow hired drivers"/>
+        <e k="transportCompany_hintTitle" v="Transport Company"/>
+        <e k="transportCompany_hintIntro" v="You now run a transport company. Open the PDA and use the Transport Company page to accept freight contracts, dispatch your trucks and track your profit."/>
+        <e k="transportCompany_gameplayHint" v="Transport Company: accept freight contracts from the dispatch board in the PDA. Trucks earn revenue per job and fuel costs are charged to the truck's ledger. A truck is any vehicle classified as a truck in the base game; it needs a trailer to haul bulk or pallet freight."/>
+        <e k="transportCompany_hint_dispatch" v="Transport Company: accept freight contracts from the dispatch board in the PDA. Assign a truck or hire a driver to haul the load."/>
+        <e k="transportCompany_hint_fleet" v="Transport Company: your fleet's revenue, fuel costs, and profit are tracked per truck in the Fleet and Ledger tabs of the dispatch office."/>
+    </elements>
+</l10n>
