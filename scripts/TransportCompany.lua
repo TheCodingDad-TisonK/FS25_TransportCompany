@@ -8,9 +8,9 @@
 
 TransportCompanyLog.info("Transport Company v0.1.0 loading")
 
--- Create the manager singleton
+-- Create the manager singleton (g_currentModDirectory is available at load time)
 g_transportCompanyManager = TransportCompanyManager.new(
-    g_currentMission.modDirectory,
+    g_currentModDirectory,
     "FS25_TransportCompany"
 )
 
