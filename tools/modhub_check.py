@@ -170,8 +170,7 @@ def main():
     dstart = md.find("<description>")
     dend = md.find("</description>")
     if dstart != -1 and dend != -1:
-        over = [l for l in md[dstart:dend].split("
-")
+        over = [l for l in md[dstart:dend].splitlines()
                 if l.strip() and len(l) - len(l.lstrip(" ")) > 3]
         if over:
             err("description has %d line(s) indented more than 3 spaces "
