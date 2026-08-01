@@ -287,6 +287,15 @@ function TransportCompanySettings:saveSettings()
     return true
 end
 
+--- Save everything that this process is allowed to write:
+--- the server-shared file (server / singleplayer only) and the
+--- per-player local file. Returns true when at least one wrote.
+function TransportCompanySettings:save()
+    local sharedOk = self:saveSettings()
+    local localOk = self:saveLocalSettings()
+    return sharedOk or localOk
+end
+
 --- Save local-only settings (per-player profile).
 function TransportCompanySettings:saveLocalSettings()
     local path = self:getLocalSettingsPath()

@@ -71,14 +71,19 @@ function TransportCompanyContract.new()
     self.destUniqueId = nil
     self.destStationIndex = nil
     self.destName = ""
-    -- Timing (game ms, g_currentMission.time)
-    self.acceptedTime = nil
-    self.deadline = nil
-    -- Execution bookkeeping
-    self.acceptedTruckUniqueId = nil
+    -- Timing (game ms, g_currentMission.time). 0 means "not set" —
+    -- never nil, so every comparison below is safe without a guard.
+    self.acceptedTime = 0
+    self.deadline = 0
+    -- Execution bookkeeping.
+    -- Vehicle uniqueIds are STRINGS ("vehicle" .. md5, see
+    -- Utils.getUniqueId / VehicleSystem.lua:170), so "" is the empty
+    -- value here, not 0.
+    self.acceptedTruckUniqueId = ""
+    self.farmId = 0                  -- farm that accepted the contract
     self.isHiredDriver = false
-    self.hiredDriverJobId = nil      -- base game AI job id while driving
-    self.completedTime = nil
+    self.hiredDriverJobId = 0        -- base game AI job id while driving
+    self.completedTime = 0
     return self
 end
 
@@ -101,7 +106,8 @@ function TransportCompanyContract:writeStream(streamId, connection)
     streamWriteString(streamId, self.destName or "")
     streamWriteFloat32(streamId, self.acceptedTime or 0)
     streamWriteFloat32(streamId, self.deadline or 0)
-    streamWriteInt32(streamId, self.acceptedTruckUniqueId or 0)
+    streamWriteString(streamId, self.acceptedTruckUniqueId or "")
+    streamWriteInt32(streamId, self.farmId or 0)
     streamWriteBool(streamId, self.isHiredDriver)
     streamWriteInt32(streamId, self.hiredDriverJobId or 0)
     streamWriteFloat32(streamId, self.completedTime or 0)
@@ -124,7 +130,8 @@ function TransportCompanyContract:readStream(streamId, connection)
     self.destName = streamReadString(streamId)
     self.acceptedTime = streamReadFloat32(streamId)
     self.deadline = streamReadFloat32(streamId)
-    self.acceptedTruckUniqueId = streamReadInt32(streamId)
+    self.acceptedTruckUniqueId = streamReadString(streamId)
+    self.farmId = streamReadInt32(streamId)
     self.isHiredDriver = streamReadBool(streamId)
     self.hiredDriverJobId = streamReadInt32(streamId)
     self.completedTime = streamReadFloat32(streamId)
@@ -146,7 +153,8 @@ function TransportCompanyContract:saveToXMLFile(xmlFile, key)
     xmlFile:setString(key .. "#destName", self.destName or "")
     xmlFile:setFloat(key .. "#acceptedTime", self.acceptedTime or 0)
     xmlFile:setFloat(key .. "#deadline", self.deadline or 0)
-    xmlFile:setInt(key .. "#acceptedTruckUniqueId", self.acceptedTruckUniqueId or 0)
+    xmlFile:setString(key .. "#acceptedTruckUniqueId", self.acceptedTruckUniqueId or "")
+    xmlFile:setInt(key .. "#farmId", self.farmId or 0)
     xmlFile:setBool(key .. "#isHiredDriver", self.isHiredDriver)
     xmlFile:setInt(key .. "#hiredDriverJobId", self.hiredDriverJobId or 0)
     xmlFile:setFloat(key .. "#completedTime", self.completedTime or 0)
@@ -169,27 +177,25 @@ function TransportCompanyContract:loadFromXMLFile(xmlFile, key)
     self.destName = xmlFile:getString(key .. "#destName", "")
     self.acceptedTime = xmlFile:getFloat(key .. "#acceptedTime", 0)
     self.deadline = xmlFile:getFloat(key .. "#deadline", 0)
-    self.acceptedTruckUniqueId = xmlFile:getInt(key .. "#acceptedTruckUniqueId", 0)
+    self.acceptedTruckUniqueId = xmlFile:getString(key .. "#acceptedTruckUniqueId", "")
+    self.farmId = xmlFile:getInt(key .. "#farmId", 0)
     self.isHiredDriver = xmlFile:getBool(key .. "#isHiredDriver", false)
     self.hiredDriverJobId = xmlFile:getInt(key .. "#hiredDriverJobId", 0)
     self.completedTime = xmlFile:getFloat(key .. "#completedTime", 0)
 end
 
----Resolve station references from string uniqueIds back to live station objects.
----Called after loading from XML when the placeable system is fully initialized.
+---Validate the saved station references against the live world.
+---Called after loading from XML, once the placeable system is up.
+---
+---The saved (uniqueId, index) pair IS the reference — nothing needs
+---converting. StorageSystem:getPlaceableLoadingStationIndex takes a
+---station OBJECT and returns its index (StorageSystem.lua:103), so
+---feeding it the stored index would be meaningless. All this does is
+---confirm the pair still resolves; a contract whose station was
+---demolished between saves is unplayable and reports false.
+---@return boolean isValid
 function TransportCompanyContract:_resolveStationRefs()
-    if self.sourceUniqueId and self.sourceUniqueId ~= "" then
-        local placeable = g_currentMission.placeableSystem:getPlaceableByUniqueId(self.sourceUniqueId)
-        if placeable ~= nil then
-            self.sourceStationIndex = g_currentMission.storageSystem:getPlaceableLoadingStationIndex(placeable, self.sourceStationIndex)
-        end
-    end
-    if self.destUniqueId and self.destUniqueId ~= "" then
-        local placeable = g_currentMission.placeableSystem:getPlaceableByUniqueId(self.destUniqueId)
-        if placeable ~= nil then
-            self.destStationIndex = g_currentMission.storageSystem:getPlaceableUnloadingStationIndex(placeable, self.destStationIndex)
-        end
-    end
+    return self:getSourceStation() ~= nil and self:getDestStation() ~= nil
 end
 
 -- ── Station resolution (live objects) ──────────────────────
@@ -247,18 +253,71 @@ function TransportCompanyContract:getIsComplete()
         or (self.delivered >= self.amount - 0.001)
 end
 
---- Time remaining in ms; nil when no deadline.
+--- Time remaining in ms; nil when no deadline is set.
 function TransportCompanyContract:getTimeLeft()
-    if self.deadline == nil or g_currentMission == nil then
+    if self.deadline == nil or self.deadline == 0 or g_currentMission == nil then
         return nil
     end
     return self.deadline - g_currentMission.time
 end
 
 --- Is the contract past its deadline?
-function TransportCompanyContract:getIsExpired()
-    local timeLeft = self:getTimeLeft()
-    return timeLeft ~= nil and timeLeft <= 0
+---@param now number|nil Optional clock override (defaults to mission time)
+function TransportCompanyContract:getIsExpired(now)
+    if self.deadline == nil or self.deadline == 0 then
+        return false
+    end
+    now = now or (g_currentMission ~= nil and g_currentMission.time)
+    if now == nil then
+        return false
+    end
+    return self.deadline - now <= 0
+end
+
+-- ── Lifecycle transitions ──────────────────────────────────
+-- Server-side state changes. The manager broadcasts a
+-- TransportCompanyContractEvent after each of these so clients
+-- follow along.
+
+--- Accept the contract for a farm, optionally assigning a truck.
+---@param farmId number Farm taking the job
+---@param truckUniqueId string|nil Vehicle uniqueId (a STRING, see new())
+---@param isHiredDriver boolean|nil Job is hauled by the base game AI
+---@return boolean accepted
+function TransportCompanyContract:accept(farmId, truckUniqueId, isHiredDriver)
+    if self.state ~= TransportCompanyContract.STATE_AVAILABLE then
+        return false
+    end
+    self.state = TransportCompanyContract.STATE_ACCEPTED
+    self.farmId = farmId or 0
+    self.acceptedTruckUniqueId = truckUniqueId or ""
+    self.isHiredDriver = isHiredDriver == true
+    self.acceptedTime = g_currentMission ~= nil and g_currentMission.time or 0
+    return true
+end
+
+--- Mark the contract completed and stamp the completion time.
+---@return boolean changed False when it was already completed
+function TransportCompanyContract:complete()
+    if self.state == TransportCompanyContract.STATE_COMPLETED then
+        return false
+    end
+    self.state = TransportCompanyContract.STATE_COMPLETED
+    self.delivered = self.amount
+    self.completedTime = g_currentMission ~= nil and g_currentMission.time or 0
+    return true
+end
+
+--- Mark the contract expired (deadline passed without delivery).
+---@return boolean changed
+function TransportCompanyContract:expire()
+    if self.state == TransportCompanyContract.STATE_COMPLETED or
+       self.state == TransportCompanyContract.STATE_EXPIRED then
+        return false
+    end
+    self.state = TransportCompanyContract.STATE_EXPIRED
+    self.completedTime = g_currentMission ~= nil and g_currentMission.time or 0
+    return true
 end
 
 --- Add delivered amount (liters/objects). Returns true when this
@@ -293,7 +352,8 @@ end
 -- Scans the live station lists and emits a fresh contract.
 -- Returns a new contract or nil when no valid route exists.
 
-function TransportCompanyContract.generate()
+---@param deadlineDays number|nil Deadline in game days (default 3)
+function TransportCompanyContract.generate(deadlineDays)
     local storageSystem = g_currentMission.storageSystem
     if storageSystem == nil then
         return nil
@@ -302,9 +362,13 @@ function TransportCompanyContract.generate()
     -- loadingStations is a map keyed by the station object itself
     -- (StorageSystem.lua:71). Station -> placeable index comes from
     -- owningPlaceable (AIParameterLoadingStation.lua:11-17).
+    -- Only stations that hang off a placeable can be persisted, because
+    -- the saved reference is (placeable uniqueId, station index). A
+    -- station without an owningPlaceable would save as an empty ref and
+    -- come back unresolvable, so it is skipped at generation time.
     local loadingStations = {}
     for station, _ in pairs(storageSystem.loadingStations) do
-        if station ~= nil then
+        if station ~= nil and station.owningPlaceable ~= nil then
             local fillTypes = station:getSupportedFillTypes()
             if fillTypes ~= nil then
                 for fillTypeIndex, _ in pairs(fillTypes) do
@@ -348,9 +412,13 @@ function TransportCompanyContract.generate()
     end
 
     -- Find a destination station that accepts this fill type.
+    -- Same placeable-ownership requirement as the source, and never
+    -- route a load back into the station it was collected from.
     local destCandidates = {}
     for station, _ in pairs(storageSystem.unloadingStations) do
-        if station ~= nil and station:getIsFillTypeSupported(contract.fillTypeIndex) then
+        if station ~= nil and station.owningPlaceable ~= nil
+           and station.owningPlaceable ~= source.station.owningPlaceable
+           and station:getIsFillTypeSupported(contract.fillTypeIndex) then
             table.insert(destCandidates, {
                 ["station"] = station,
                 ["name"] = station:getName(),
@@ -392,8 +460,14 @@ function TransportCompanyContract.generate()
     -- Unique id: time-based + random suffix (no os.time on FS).
     contract.contractId = string.format("tc_%d_%d", g_currentMission.time, math.random(10000, 99999))
 
-    -- Deadline: base TransportMission uses ~3.2 game days; the manager
-    -- applies the configured contractDeadlineDays setting on top.
-    contract.deadline = g_currentMission.time + contract.DAY_LENGTH * 3
+    -- Deadline from the configured contractDeadlineDays setting; the
+    -- base TransportMission uses ~3.2 game days as its own reference.
+    contract.deadline = g_currentMission.time
+        + TransportCompanyContract.DAY_LENGTH * (deadlineDays or 3)
+
+    -- A contract nobody can resolve is worse than no contract at all.
+    if not contract:_resolveStationRefs() then
+        return nil
+    end
     return contract
 end

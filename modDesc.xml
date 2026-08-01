@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8" standalone="no" ?>
 <modDesc descVersion="106">
-    <title>Transport Company</title>
+    <title>
+        <en>Transport Company</en>
+    </title>
     <description><![CDATA[
 Own and operate a trucking company.
 

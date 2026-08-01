@@ -46,7 +46,8 @@ function TransportCompanyMoneyEvent:writeStream(streamId, connection)
     streamWriteFloat64(streamId, self.amount)
     streamWriteInt32(streamId, self.farmId or 0)
     streamWriteString(streamId, self.contractId or "")
-    streamWriteInt32(streamId, self.truckUniqueId or 0)
+    -- Vehicle uniqueIds are strings ("vehicle" .. md5, VehicleSystem.lua:170)
+    streamWriteString(streamId, self.truckUniqueId or "")
 end
 
 function TransportCompanyMoneyEvent:readStream(streamId, connection)
@@ -54,7 +55,7 @@ function TransportCompanyMoneyEvent:readStream(streamId, connection)
     self.amount = streamReadFloat64(streamId)
     self.farmId = streamReadInt32(streamId)
     self.contractId = streamReadString(streamId)
-    self.truckUniqueId = streamReadInt32(streamId)
+    self.truckUniqueId = streamReadString(streamId)
     self:run(connection)
 end
 

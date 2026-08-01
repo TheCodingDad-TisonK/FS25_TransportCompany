@@ -125,6 +125,11 @@
     <text name="transportCompany_stateAccepted">
         <en>Accepted</en>
     </text>
+    <!-- Unit suffix for pallet contracts; bulk contracts use the base
+         game key unit_liter. -->
+    <text name="transportCompany_unitObjects">
+        <en>pcs</en>
+    </text>
 
     <!-- Fleet -->
     <text name="transportCompany_fleetListTitle">

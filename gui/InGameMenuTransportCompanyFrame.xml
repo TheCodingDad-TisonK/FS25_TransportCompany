@@ -4,37 +4,86 @@
 		<Bitmap profile="fs25_subCategoryContainerArrow"/>
 	</ThreePartBitmap>
 	<Bitmap profile="fs25_subCategoryContainer">
-		<MultiTextOption profile="fs25_subCategorySelector" id="subCategorySelector" onChange="onChangeSubCategory" focusInit="onOpen"/>
+		<!-- MultiTextOptionElement registers its callback from #onClick
+		     (MultiTextOptionElement.lua:63); #onChange is not read. -->
+		<MultiTextOption profile="fs25_subCategorySelector" id="subCategorySelector" onClick="onChangeSubCategory" focusInit="onOpen"/>
 		<BoxLayout profile="fs25_subCategorySelectorBox" id="subCategoryDotBox"/>
 		<RoundCorner profile="fs25_subCategorySelectorDot" id="subCategoryDotTemplate"/>
 		<GuiElement profile="fs25_subCategoryListContainer" id="contractsListBox">
 			<Bitmap profile="fs25_subCategoryStartClipper" name="startClipper"/>
 			<Bitmap profile="fs25_subCategoryStopClipper" name="endClipper"/>
+			<!-- Every ListItem needs a name: the cell database is keyed by
+			     it (SmoothListElement.lua:255) and getCellTypeForItemInSection
+			     returns that name to pick a row layout. -->
 			<SmoothList profile="fs25_subCategoryList" id="contentList" startClipperElementName="startClipper" endClipperElementName="endClipper" emptyIndicatorId="noContractsText">
-				<ListItem profile="fs25_subCategoryListItem">
-					<Bitmap profile="fs25_subCategoryListItemIcon" name="icon" imageSize="512 512"/>
+				<ListItem profile="fs25_subCategoryListItem" name="contractItem">
 					<Text profile="fs25_subCategoryListItemName" name="type"/>
-					<Text profile="fs25_contractsListItemTime" name="state"/>
-					<Text profile="fs25_contractsListItemReward" name="progress"/>
-					<Text profile="fs25_contractsListItemReward" name="reward"/>
+					<Text profile="fs25_transportCompanyListItemTime" name="state"/>
+					<Text profile="fs25_transportCompanyListItemProgress" name="progress"/>
+					<Text profile="fs25_transportCompanyListItemReward" name="reward"/>
 				</ListItem>
 				<ListItem profile="fs25_subCategoryListItem" name="fleetItem">
 					<Text profile="fs25_subCategoryListItemName" name="name"/>
-					<Text profile="fs25_contractsListItemReward" name="revenue"/>
-					<Text profile="fs25_contractsListItemTime" name="fuel"/>
-					<Text profile="fs25_contractsListItemReward" name="distance"/>
-					<Text profile="fs25_contractsListItemReward" name="jobs"/>
-					<Text profile="fs25_contractsListItemReward" name="profit"/>
+					<Text profile="fs25_transportCompanyListItemTime" name="distance"/>
+					<Text profile="fs25_transportCompanyListItemProgress" name="fuel"/>
+					<Text profile="fs25_transportCompanyListItemJobs" name="jobs"/>
+					<Text profile="fs25_transportCompanyListItemReward" name="profit"/>
+					<Text profile="fs25_transportCompanyListItemRevenue" name="revenue"/>
 				</ListItem>
 				<ListItem profile="fs25_subCategoryListItem" name="ledgerItem">
 					<Text profile="fs25_subCategoryListItemName" name="label"/>
-					<Text profile="fs25_contractsListItemReward" name="value"/>
+					<Text profile="fs25_transportCompanyListItemReward" name="value"/>
 				</ListItem>
-				<ListItem profile="fs25_subCategoryListItemEmpty" name="empty"/>
 			</SmoothList>
 			<ThreePartBitmap profile="fs25_subCategoryListSliderBox">
 				<Slider profile="fs25_listSlider" dataElementId="contentList"/>
 			</ThreePartBitmap>
 		</GuiElement>
 	</Bitmap>
+
+	<!-- The list's emptyIndicatorId resolves against the frame
+	     (SmoothListElement.lua:238), so the element it names has to
+	     exist somewhere in this GUI or the indicator is never shown. -->
+	<GuiElement profile="fs25_menuContentContainer">
+		<Text profile="fs25_transportCompanyEmptyText" id="noContractsText" text="$l10n_transportCompany_noContracts"/>
+	</GuiElement>
+
+	<!-- fs25_contractsListItemTime / fs25_contractsListItemReward are
+	     declared locally inside dataS/gui/InGameMenuContractsFrame.xml,
+	     not in dataS/guiProfiles.xml — they are not global and cannot be
+	     referenced from here. These are equivalent local declarations. -->
+	<GUIProfiles>
+		<Profile name="fs25_transportCompanyListItemTime" extends="fs25_textDarkHighlight" with="anchorBottomRight">
+			<position value="-38px 30px"/>
+			<textAlignment value="right"/>
+		</Profile>
+		<Profile name="fs25_transportCompanyListItemReward" extends="fs25_textDarkHighlight" with="anchorBottomLeft">
+			<position value="100px 30px"/>
+			<textSize value="26px"/>
+			<textVerticalAlignment value="bottom"/>
+			<textColor value="$preset_fs25_colorMainHighlight"/>
+			<textFocusedColor value="$preset_fs25_colorMainLight"/>
+			<textHighlightedColor value="$preset_fs25_colorMainHighlight"/>
+		</Profile>
+		<Profile name="fs25_transportCompanyListItemProgress" extends="fs25_transportCompanyListItemReward">
+			<position value="320px 30px"/>
+			<textColor value="$preset_fs25_colorMainLight"/>
+		</Profile>
+		<Profile name="fs25_transportCompanyListItemJobs" extends="fs25_transportCompanyListItemReward">
+			<position value="520px 30px"/>
+			<textColor value="$preset_fs25_colorMainLight"/>
+		</Profile>
+		<Profile name="fs25_transportCompanyListItemRevenue" extends="fs25_transportCompanyListItemReward">
+			<position value="660px 30px"/>
+			<textColor value="$preset_fs25_colorMainLight"/>
+		</Profile>
+		<Profile name="fs25_transportCompanyEmptyText" extends="fs25_textDefault" with="anchorMiddleCenter">
+			<size value="500px 100px"/>
+			<position value="0px 57px"/>
+			<textSize value="26px"/>
+			<textAlignment value="center"/>
+			<textWrapWidth value="475px"/>
+			<textMaxNumLines value="4"/>
+		</Profile>
+	</GUIProfiles>
 </GUI>

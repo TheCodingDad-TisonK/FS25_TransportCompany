@@ -34,8 +34,10 @@ local TransportCompanyTruck_mt = Class(TransportCompanyTruck)
 
 function TransportCompanyTruck.new(vehicle)
     local self = setmetatable({}, TransportCompanyTruck_mt)
+    -- uniqueId is a STRING: Utils.getUniqueId builds "vehicle" .. md5
+    -- (VehicleSystem.lua:170), so it must never be written as an int.
     self.uniqueId = vehicle:getUniqueId()          -- stable id (Vehicle.lua:3058)
-    self.name = vehicle:getFullName()              -- localized display name (Vehicle.lua:193)
+    self.vehicleName = vehicle:getFullName()       -- localized display name (Vehicle.lua:2886)
     self.farmId = vehicle:getOwnerFarmId()
     self.revenue = 0                               -- money earned on contracts
     self.fuelCost = 0                              -- cost of fuel burned (economy price)
@@ -51,9 +53,9 @@ end
 -- ── Persistence ────────────────────────────────────────────
 
 function TransportCompanyTruck:saveToXMLFile(xmlFile, key)
-    xmlFile:setInt(key .. "#uniqueId", self.uniqueId)
-    xmlFile:setString(key .. "#name", self.name)
-    xmlFile:setInt(key .. "#farmId", self.farmId)
+    xmlFile:setString(key .. "#uniqueId", self.uniqueId or "")
+    xmlFile:setString(key .. "#vehicleName", self.vehicleName or "")
+    xmlFile:setInt(key .. "#farmId", self.farmId or 0)
     xmlFile:setFloat(key .. "#revenue", self.revenue)
     xmlFile:setFloat(key .. "#fuelCost", self.fuelCost)
     xmlFile:setFloat(key .. "#distanceM", self.distanceM)
@@ -63,8 +65,8 @@ end
 
 function TransportCompanyTruck.loadFromXMLFile(xmlFile, key)
     local self = setmetatable({}, TransportCompanyTruck_mt)
-    self.uniqueId = xmlFile:getInt(key .. "#uniqueId", 0)
-    self.name = xmlFile:getString(key .. "#name", "Truck")
+    self.uniqueId = xmlFile:getString(key .. "#uniqueId", "")
+    self.vehicleName = xmlFile:getString(key .. "#vehicleName", "Truck")
     self.farmId = xmlFile:getInt(key .. "#farmId", 0)
     self.revenue = xmlFile:getFloat(key .. "#revenue", 0)
     self.fuelCost = xmlFile:getFloat(key .. "#fuelCost", 0)
@@ -82,17 +84,30 @@ function TransportCompanyTruck:getProfit()
     return self.revenue - self.fuelCost
 end
 
+--- Credit contract revenue to this truck's books.
+function TransportCompanyTruck:addRevenue(amount)
+    self.revenue = self.revenue + (amount or 0)
+end
+
+--- Charge an expense (fuel, driver cut) to this truck's books.
+--- Amounts are stored positive; getProfit subtracts them.
+function TransportCompanyTruck:addExpense(amount)
+    self.fuelCost = self.fuelCost + math.abs(amount or 0)
+end
+
+--- Count one completed delivery.
+function TransportCompanyTruck:addJob()
+    self.jobsDelivered = self.jobsDelivered + 1
+end
+
 --- Find the live vehicle object for this registry entry.
+--- VehicleSystem keeps a uniqueId index (VehicleSystem.lua:11), so
+--- there is no reason to walk the whole vehicle list.
 function TransportCompanyTruck:getVehicle()
     if g_currentMission == nil or g_currentMission.vehicleSystem == nil then
         return nil
     end
-    for _, vehicle in pairs(g_currentMission.vehicleSystem.vehicles) do
-        if vehicle:getUniqueId() == self.uniqueId then
-            return vehicle
-        end
-    end
-    return nil
+    return g_currentMission.vehicleSystem.vehicleByUniqueId[self.uniqueId]
 end
 
 -- ── Server-side sampling (called from manager update) ──────
@@ -103,33 +118,61 @@ end
 --- NOTE: fillUnits is a map keyed by fillUnitIndex (base game uses
 --- pairs(...), see FertilizeMission.lua:63), not a dense array.
 function TransportCompanyTruck:sampleFuel(vehicle, dt)
-    local fillUnits = vehicle:getFillUnits()
-    if fillUnits == nil then
+    local index = TransportCompanyTruck.getFuelFillUnitIndex(vehicle)
+    if index == nil then
         return 0
     end
+
+    local level = vehicle:getFillUnitFillLevel(index)
+    if level == nil then
+        return 0
+    end
+
     local cost = 0
-    for index, fillUnit in pairs(fillUnits) do
-        local fillType = fillUnit.fillType
-        if fillType ~= nil and fillType == FillType.DIESEL then
-            local level = fillUnit.fillLevel
-            if level == nil then
-                level = vehicle:getFillUnitFillLevel(index)
+    local last = self.sampleFillLevels[index]
+    if last ~= nil then
+        local delta = level - last
+        if delta < -0.001 then
+            -- Fuel burned: value at the current economy price.
+            -- getCostPerLiter (EconomyManager.lua:371) can return nil for
+            -- a fill type with no configured cost, so it is guarded.
+            local liters = -delta
+            local price = g_currentMission.economyManager:getCostPerLiter(FillType.DIESEL)
+            if price ~= nil and price > 0 then
+                cost = liters * price
+                self.fuelCost = self.fuelCost + cost
             end
-            local last = self.sampleFillLevels[index]
-            if last ~= nil then
-                local delta = level - last
-                if delta < -0.001 then
-                    -- Fuel burned: value at the current economy price.
-                    local liters = -delta
-                    local price = g_currentMission.economyManager:getCostPerLiter(fillType)
-                    self.fuelCost = self.fuelCost + liters * price
-                    cost = cost + liters * price
-                end
-            end
-            self.sampleFillLevels[index] = level
         end
     end
+    self.sampleFillLevels[index] = level
     return cost
+end
+
+--- Locate the diesel fill unit for a vehicle.
+--- Motorized exposes getConsumerFillUnitIndex (Motorized.lua:1923) —
+--- authoritative when present. Falls back to scanning the fill units,
+--- which is a map keyed by fillUnitIndex, not a dense array.
+---@return number|nil fillUnitIndex
+function TransportCompanyTruck.getFuelFillUnitIndex(vehicle)
+    if vehicle.getConsumerFillUnitIndex ~= nil then
+        local index = vehicle:getConsumerFillUnitIndex(FillType.DIESEL)
+        if index ~= nil then
+            return index
+        end
+    end
+    if vehicle.getFillUnits == nil then
+        return nil
+    end
+    local fillUnits = vehicle:getFillUnits()
+    if fillUnits == nil then
+        return nil
+    end
+    for index, fillUnit in pairs(fillUnits) do
+        if fillUnit.fillType == FillType.DIESEL then
+            return index
+        end
+    end
+    return nil
 end
 
 --- Accumulate distance from the vehicle's last moved distance.
@@ -145,15 +188,22 @@ end
 --- Called when the truck starts being tracked: seed fill levels.
 function TransportCompanyTruck:beginSampling(vehicle)
     self.sampleFillLevels = {}
-    local fillUnits = vehicle:getFillUnits()
-    if fillUnits ~= nil then
-        for index, fillUnit in pairs(fillUnits) do
-            if fillUnit.fillType ~= nil and fillUnit.fillType == FillType.DIESEL then
-                self.sampleFillLevels[index] = vehicle:getFillUnitFillLevel(index)
-            end
-        end
+    local index = TransportCompanyTruck.getFuelFillUnitIndex(vehicle)
+    if index ~= nil then
+        self.sampleFillLevels[index] = vehicle:getFillUnitFillLevel(index)
     end
     self.lastSampledDistance = vehicle.lastMovedDistance or 0
+end
+
+--- Does this vehicle qualify as a company truck?
+--- Motorized normalises statsType to tractor/car/truck
+--- (Motorized.lua:451-453); only "truck" enrolls.
+---@return boolean
+function TransportCompanyTruck.getIsTruck(vehicle)
+    if vehicle == nil or vehicle.spec_motorized == nil then
+        return false
+    end
+    return vehicle.spec_motorized.statsType == "truck"
 end
 
 --- Try to find the live vehicle; returns (vehicle, shouldUnenroll).

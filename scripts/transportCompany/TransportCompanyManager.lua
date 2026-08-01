@@ -55,9 +55,6 @@ function TransportCompanyManager.new(modDirectory, modName)
     self.tickTimer = 0
     self.deadlineCheckTimer = 0
 
-    -- Message center subscriptions (stored for cleanup)
-    self._messageSubscriptions = {}
-
     return self
 end
 
@@ -69,7 +66,16 @@ end
 function TransportCompanyManager:load()
     TransportCompanyLog.info("TransportCompanyManager: load()")
 
-    -- Mission lifecycle hooks (closures capture self)
+    -- Mission lifecycle hooks (closures capture self).
+    --
+    -- Only these two exist on Mission00 (mission00.lua:290 and :560).
+    -- Earlier versions of this file also appended to onMissionStarted,
+    -- onMissionFinished and deleteMission — none of which are engine
+    -- functions. Utils.appendedFunction(nil, fn) returns fn unchanged
+    -- (Utils.lua:380-386), so those hooks silently defined functions
+    -- that nothing ever called and the whole mod stayed inert.
+    -- The onStartMission pattern is what the base game itself uses,
+    -- see KioskMode.lua:262.
     Mission00.loadMission00Finished = Utils.appendedFunction(
         Mission00.loadMission00Finished,
         function()
@@ -77,22 +83,17 @@ function TransportCompanyManager:load()
         end
     )
 
-    Mission00.onMissionStarted = Utils.appendedFunction(
-        Mission00.onMissionStarted,
+    Mission00.onStartMission = Utils.appendedFunction(
+        Mission00.onStartMission,
         function()
             self:_onMissionStarted()
         end
     )
 
-    Mission00.onMissionFinished = Utils.appendedFunction(
-        Mission00.onMissionFinished,
-        function()
-            self:_onMissionFinished()
-        end
-    )
-
-    Mission00.deleteMission = Utils.appendedFunction(
-        Mission00.deleteMission,
+    -- Teardown: Mission00:delete() (mission00.lua:86) is the real
+    -- shutdown path.
+    Mission00.delete = Utils.prependedFunction(
+        Mission00.delete,
         function()
             self:_onDeleteMission()
         end
@@ -136,7 +137,11 @@ function TransportCompanyManager:_onMissionLoaded()
     self.isMissionLoaded = true
     self.isServer = g_server ~= nil
 
-    -- Load settings (shared + local)
+    -- Load settings (shared + local).
+    -- NOTE: settings values live in settings.config and are read with
+    -- settings:get(id). Reading them as plain fields (settings.enabled)
+    -- always yields nil, which previously disabled every guarded code
+    -- path in this file.
     self.settings:loadSettings()
 
     -- Restore contracts from savegame (if any)
@@ -156,7 +161,8 @@ function TransportCompanyManager:_onMissionLoaded()
             if placeable ~= nil and SpecializationUtil.hasSpecialization(
                 TransportCompanyHq, placeable.specializations
             ) then
-                self:onHqChanged(placeable)
+                -- Placeables found by this scan exist and are live.
+                self:onHqChanged(placeable, true)
             end
         end
     end
@@ -166,47 +172,46 @@ function TransportCompanyManager:_onMissionLoaded()
     )
 end
 
----Called at Mission00.onMissionStarted (player is in the
----world, fields are populated). Starts truck sampling and
----registers the AI job completion listener.
+---Called at Mission00.onStartMission (player is in the world,
+---fields are populated). Builds the fleet roster and registers
+---the AI job completion listener.
 function TransportCompanyManager:_onMissionStarted()
     TransportCompanyLog.info("TransportCompanyManager: _onMissionStarted()")
 
-    if not self.settings.enabled then
+    if not self.settings:get("enabled") then
         return
     end
 
-    -- Start truck sampling (server only — clients don't run AI jobs)
-    if self.isServer then
-        self:_startTruckSampling()
-    end
+    -- Build the fleet roster everywhere; only the server samples it.
+    self:_startTruckSampling()
 
-    -- Subscribe to AI job completion (hired-driver delivery)
-    local subscription = g_messageCenter:subscribe(
+    -- Subscribe to AI job completion (hired-driver delivery).
+    -- MessageCenter:subscribe returns nothing (MessageCenter.lua:27-49),
+    -- so there is no handle to keep; teardown unsubscribes by target.
+    g_messageCenter:subscribe(
         MessageType.AI_JOB_STOPPED,
         TransportCompanyManager._onAIServerJobStopped,
         self
     )
-    table.insert(self._messageSubscriptions, subscription)
 
     TransportCompanyLog.info("TransportCompanyManager: _onMissionStarted() complete")
 end
 
----Called at Mission00.onMissionFinished. Unsubscribes from
----message center and stops truck sampling.
+---Tear down subscriptions and stop sampling. Reached via
+---_onDeleteMission (Mission00:delete).
 function TransportCompanyManager:_onMissionFinished()
     TransportCompanyLog.info("TransportCompanyManager: _onMissionFinished()")
 
-    -- Unsubscribe from message center
-    for _, sub in ipairs(self._messageSubscriptions) do
-        g_messageCenter:unsubscribe(sub)
-    end
-    self._messageSubscriptions = {}
+    -- Unsubscribe from the message center.
+    -- unsubscribe() takes (messageType, callbackTarget, callback)
+    -- (MessageCenter.lua:53) — there is no handle-based form, so drop
+    -- everything registered against this manager in one call.
+    g_messageCenter:unsubscribeAll(self)
 
     self.isMissionLoaded = false
 end
 
----Called at Mission00.deleteMission. Full cleanup.
+---Called from Mission00:delete (mission00.lua:86). Full cleanup.
 function TransportCompanyManager:_onDeleteMission()
     TransportCompanyLog.info("TransportCompanyManager: _onDeleteMission()")
 
@@ -236,18 +241,7 @@ end
 function TransportCompanyManager:_registerPdaPage()
     local success, errorMsg = pcall(function()
         if g_gui == nil then return end
-
-        -- Load the frame XML
-        local frameName = "InGameMenuTransportCompanyFrame"
-        local xmlPath = self.modDirectory .. "gui/" .. frameName .. ".xml"
-
-        g_gui:loadGui(xmlPath, frameName, nil, true)
-
-        local screen = _G[frameName]
-        if screen == nil then
-            TransportCompanyLog.error("Failed to load PDA frame: %s", frameName)
-            return
-        end
+        if self.pdaFrame ~= nil then return end   -- already registered
 
         -- Get the InGameMenu instance
         local inGameMenu = g_inGameMenu
@@ -256,8 +250,29 @@ function TransportCompanyManager:_registerPdaPage()
             return
         end
 
-        -- Expose controls as fields so the paging system can find them
-        screen:exposeControlsAsFields()
+        -- Load the frame XML.
+        --
+        -- loadGui(xmlFilename, name, controller, isFrame) dereferences
+        -- the controller immediately (`controller.name = name`,
+        -- Gui.lua:200) — passing nil for it threw every time, which is
+        -- why the PDA page never appeared. The controller IS the frame
+        -- instance; this mirrors InGameMenuContractsFrame.register()
+        -- at InGameMenuContractsFrame.lua:15-18.
+        local frameName = "InGameMenuTransportCompanyFrame"
+        local xmlPath = self.modDirectory .. "gui/" .. frameName .. ".xml"
+
+        local screen = InGameMenuTransportCompanyFrame.new()
+        g_gui:loadGui(xmlPath, frameName, screen, true)
+        self.pdaFrame = screen
+
+        -- loadGui already calls exposeControlsAsFields (Gui.lua:216),
+        -- so it must not be called a second time here.
+
+        -- Nothing calls a frame's initialize() automatically —
+        -- InGameMenu does it by hand for each of its own pages
+        -- (InGameMenu.lua:203-223), so a mod page must do the same or
+        -- its element references stay nil.
+        screen:initialize()
 
         -- Add to the paging element (avoid duplicates)
         if inGameMenu.pagingElement ~= nil then
@@ -290,11 +305,15 @@ function TransportCompanyManager:_registerPdaPage()
             pcall(inGameMenu.registerPage, inGameMenu, screen, nil, enablePredicate)
         end
 
-        -- Add the tab button (icon from mod textures)
+        -- Add the tab button (icon from mod textures).
+        --
+        -- getUVs must be given the STRING form for a full-texture icon.
+        -- A table is treated as pixel values and divided by the 1024
+        -- reference size (GuiUtils.lua:31), so {0,0,1,1} would select a
+        -- single pixel; "0 0 1 1" is passed through untouched.
         local iconFile = Utils.getFilename("textures/tab_transportCompany.png", self.modDirectory)
-        local uvs = {0, 0, 1, 1}
         if type(inGameMenu.addPageTab) == "function" and GuiUtils ~= nil then
-            pcall(inGameMenu.addPageTab, inGameMenu, screen, iconFile, GuiUtils.getUVs(uvs))
+            pcall(inGameMenu.addPageTab, inGameMenu, screen, iconFile, GuiUtils.getUVs("0 0 1 1"))
         end
 
         -- Rebuild the tab list so the new tab appears
@@ -310,16 +329,19 @@ function TransportCompanyManager:_registerPdaPage()
     end
 end
 
----Check whether the local player owns at least one HQ.
+---Check whether the local player's own farm has at least one HQ.
+---Drives the PDA tab's enabling predicate, so in multiplayer it must
+---not be satisfied by a rival farm's headquarters.
 ---@return boolean
 function TransportCompanyManager:_hasHq()
     if g_currentMission == nil or g_currentMission.placeableSystem == nil then
         return false
     end
+    local farmId = g_currentMission:getFarmId()
     for _, placeable in pairs(g_currentMission.placeableSystem.placeables) do
         if placeable ~= nil and SpecializationUtil.hasSpecialization(
             TransportCompanyHq, placeable.specializations
-        ) then
+        ) and (farmId == nil or farmId <= 0 or placeable:getOwnerFarmId() == farmId) then
             return true
         end
     end
@@ -328,19 +350,28 @@ end
 
 -- ── Hooks ──────────────────────────────────────
 
----Called by TransportCompanyHq spec onPlaceableFinalizePlacement /
----onPostFinalizePlacement / onSell / onDelete. Regenerates the
----contract board when HQ presence changes.
+---Called by the TransportCompanyHq spec on placement, sell and
+---delete. Regenerates the contract board when HQ presence changes.
+---
 ---@param placeable table The HQ placeable
-function TransportCompanyManager:onHqChanged(placeable)
+---@param isActive boolean True when the HQ is now live, false when it
+---       is being sold or deleted. The caller has to say which: the
+---       specialization is still attached during onSell/onDelete, so
+---       testing hasSpecialization here would report every removal as
+---       a placement and leave the sold HQ registered forever.
+function TransportCompanyManager:onHqChanged(placeable, isActive)
     if placeable == nil then return end
 
+    -- A placeable mid-teardown can have no uniqueId, and in LuaJIT
+    -- t[nil] = nil raises "table index is nil" — so bail out rather
+    -- than index the table with it.
     local uniqueId = placeable:getUniqueId()
-    local hasSpec = SpecializationUtil.hasSpecialization(
-        TransportCompanyHq, placeable.specializations
-    )
+    if uniqueId == nil or uniqueId == "" then
+        self:_regenerateContractBoard()
+        return
+    end
 
-    if hasSpec and uniqueId ~= nil and uniqueId ~= "" then
+    if isActive then
         self.hqPlaceables[uniqueId] = placeable
         TransportCompanyLog.info("HQ placed: %s", uniqueId)
     else
@@ -360,7 +391,7 @@ function TransportCompanyManager:_regenerateContractBoard()
     if not self.isServer then return end
     if not self:_hasHq() then return end
 
-    local maxActive = self.settings.maxActiveContracts or 5
+    local maxActive = self.settings:get("maxActiveContracts") or 5
     local activeCount = 0
 
     for _, contract in pairs(self.contracts) do
@@ -370,8 +401,9 @@ function TransportCompanyManager:_regenerateContractBoard()
         end
     end
 
+    local deadlineDays = self.settings:get("contractDeadlineDays") or 7
     while activeCount < maxActive do
-        local contract = TransportCompanyContract.generate()
+        local contract = TransportCompanyContract.generate(deadlineDays)
         if contract == nil then break end
         self.contracts[contract.contractId] = contract
         activeCount = activeCount + 1
@@ -383,76 +415,112 @@ function TransportCompanyManager:_regenerateContractBoard()
     end
 end
 
----Apply the contractDeadlineDays setting to all available contracts
----that don't yet have a deadline (first-time generation).
-function TransportCompanyManager:_applyDeadlineSettings()
-    local deadlineDays = self.settings.contractDeadlineDays or 7
-    local now = g_currentMission.time
-
-    for _, contract in pairs(self.contracts) do
-        if contract.state == TransportCompanyContract.STATE_AVAILABLE and
-           contract.deadline == 0 then
-            contract.deadline = now + (TransportCompanyContract.DAY_LENGTH * deadlineDays)
-        end
-    end
-end
-
 -- ── Contract Persistence ──────────────────────
 
----Save contracts to a dedicated XML file in the savegame
----directory. Called on mission finish / save.
+---Save contracts and the truck ledger to a dedicated XML file in
+---the savegame directory. Called from the FSCareerMissionInfo save
+---hook. Server-authoritative state, so only the server writes it.
+---
+---Uses the XMLFile object API throughout. The contract and truck
+---save/load methods call xmlFile:setString/:getInt etc., which only
+---exist on an XMLFile object — the procedural createXMLFile /
+---getXMLString handles used previously are plain integers and made
+---every save and load throw.
 function TransportCompanyManager:_saveContracts()
-    if not self.isMissionLoaded then return end
+    if not self.isMissionLoaded or not self.isServer then return end
 
-    local savegameDir = g_currentMission.missionInfo.savegameDirectory
-    if savegameDir == nil or savegameDir == "" then return end
+    local filePath = self:_getContractsFilePath()
+    if filePath == nil then return end
 
-    local filePath = savegameDir .. "/transportCompany_contracts.xml"
-    local xmlFile = createXMLFile("transportCompanyContracts", filePath)
-
-    if xmlFile == 0 then return end
+    local xmlFile = XMLFile.create(
+        "transportCompanyContracts", filePath, "transportCompany"
+    )
+    if xmlFile == nil then
+        TransportCompanyLog.error("Could not create '%s'", filePath)
+        return
+    end
 
     local idx = 0
-    for contractId, contract in pairs(self.contracts) do
-        local key = string.format("contracts.contract(%d)", idx)
-        contract:saveToXMLFile(xmlFile, key)
+    for _, contract in pairs(self.contracts) do
+        contract:saveToXMLFile(
+            xmlFile, string.format("transportCompany.contracts.contract(%d)", idx)
+        )
         idx = idx + 1
     end
 
-    saveXMLFile(xmlFile)
-    deleteXMLFile(xmlFile)
+    local truckIdx = 0
+    for _, truck in pairs(self.trucks) do
+        truck:saveToXMLFile(
+            xmlFile, string.format("transportCompany.trucks.truck(%d)", truckIdx)
+        )
+        truckIdx = truckIdx + 1
+    end
+
+    xmlFile:save()
+    xmlFile:delete()
+
+    TransportCompanyLog.debug("Saved %d contracts, %d trucks", idx, truckIdx)
 end
 
----Load contracts from the savegame XML file.
+---Load contracts and the truck ledger from the savegame XML file.
 function TransportCompanyManager:_loadContracts()
-    local savegameDir = g_currentMission.missionInfo.savegameDirectory
-    if savegameDir == nil or savegameDir == "" then return end
+    local filePath = self:_getContractsFilePath()
+    if filePath == nil or not fileExists(filePath) then return end
 
-    local filePath = savegameDir .. "/transportCompany_contracts.xml"
-    if not fileExists(filePath) then return end
+    local xmlFile = XMLFile.load("transportCompanyContracts", filePath)
+    if xmlFile == nil then return end
 
-    local xmlFile = loadXMLFile("transportCompanyContracts", filePath)
-    if xmlFile == 0 then return end
-
+    local loaded, dropped = 0, 0
     local idx = 0
     while true do
-        local key = string.format("contracts.contract(%d)", idx)
-        local id = getXMLString(xmlFile, key .. "#contractId")
+        local key = string.format("transportCompany.contracts.contract(%d)", idx)
+        local id = xmlFile:getString(key .. "#contractId")
         if id == nil or id == "" then break end
 
         local contract = TransportCompanyContract.new()
         contract:loadFromXMLFile(xmlFile, key)
 
-        -- Resolve station references (string uniqueId → station object)
-        contract:_resolveStationRefs()
-
-        self.contracts[contract.contractId] = contract
+        -- A station demolished since the last save leaves the contract
+        -- unplayable; drop it rather than keeping a dead board entry.
+        if contract:_resolveStationRefs() then
+            self.contracts[contract.contractId] = contract
+            loaded = loaded + 1
+        else
+            dropped = dropped + 1
+        end
         idx = idx + 1
     end
 
-    deleteXMLFile(xmlFile)
+    local truckIdx = 0
+    while true do
+        local key = string.format("transportCompany.trucks.truck(%d)", truckIdx)
+        local uniqueId = xmlFile:getString(key .. "#uniqueId")
+        if uniqueId == nil or uniqueId == "" then break end
 
-    TransportCompanyLog.info("Loaded %d contracts from savegame", idx)
+        local truck = TransportCompanyTruck.loadFromXMLFile(xmlFile, key)
+        self.trucks[truck.uniqueId] = truck
+        truckIdx = truckIdx + 1
+    end
+
+    xmlFile:delete()
+
+    TransportCompanyLog.info(
+        "Loaded %d contracts (%d dropped), %d trucks from savegame",
+        loaded, dropped, truckIdx
+    )
+end
+
+---Path of the mod's savegame file, or nil before a savegame exists.
+---@return string|nil
+function TransportCompanyManager:_getContractsFilePath()
+    if g_currentMission == nil or g_currentMission.missionInfo == nil then
+        return nil
+    end
+    local savegameDir = g_currentMission.missionInfo.savegameDirectory
+    if savegameDir == nil or savegameDir == "" then
+        return nil
+    end
+    return savegameDir .. "/transportCompany_contracts.xml"
 end
 
 -- ── Truck Sampling ──────────────────────────────
@@ -461,14 +529,68 @@ end
 function TransportCompanyManager:_startTruckSampling()
     self.tickTimer = 0
     self.deadlineCheckTimer = 0
+    self.enrollTimer = 0
+    self:_enrollTrucks()
+end
+
+---Scan the live vehicle list and enroll every qualifying truck that
+---is not already on the books. Nothing previously populated
+---self.trucks, so the Fleet and Ledger tabs were permanently empty.
+---
+---A vehicle qualifies when Motorized classifies it as a truck
+---(Motorized.lua:451-453) and it belongs to a real farm. Books for a
+---sold truck are kept — the ledger is a history, not a live roster.
+---
+---Runs on clients too: the vehicle list is synced everywhere, so a
+---client can build the same roster locally and let the money events
+---fill in the figures. Only the sampling (fuel, distance) is
+---server-authoritative.
+function TransportCompanyManager:_enrollTrucks()
+    if g_currentMission == nil or g_currentMission.vehicleSystem == nil then
+        return
+    end
+
+    for _, vehicle in pairs(g_currentMission.vehicleSystem.vehicles) do
+        if vehicle ~= nil and not vehicle:getIsBeingDeleted()
+           and TransportCompanyTruck.getIsTruck(vehicle) then
+            local uniqueId = vehicle:getUniqueId()
+            local farmId = vehicle:getOwnerFarmId()
+            if uniqueId ~= nil and uniqueId ~= ""
+               and farmId ~= nil and farmId > 0 then
+                local truck = self.trucks[uniqueId]
+                if truck == nil then
+                    truck = TransportCompanyTruck.new(vehicle)
+                    self.trucks[uniqueId] = truck
+                    TransportCompanyLog.debug(
+                        "Enrolled truck %s (%s)", uniqueId, truck.vehicleName
+                    )
+                end
+                if not truck.isEnrolled then
+                    truck.isEnrolled = true
+                    truck.farmId = farmId
+                    truck:beginSampling(vehicle)
+                end
+            end
+        end
+    end
 end
 
 ---Per-frame update hook (appended to FSBaseMission.update).
 ---Drives truck sampling (every 1s) and deadline checks (every 5s).
 ---@param dt number Delta time in milliseconds
 function TransportCompanyManager:update(dt)
-    if not self.isMissionLoaded or not self.isServer then return end
-    if not self.settings.enabled then return end
+    if not self.isMissionLoaded then return end
+    if not self.settings:get("enabled") then return end
+
+    -- Roster upkeep runs everywhere so clients can render the Fleet tab.
+    self.enrollTimer = (self.enrollTimer or 0) + dt
+    if self.enrollTimer >= 10000 then
+        self.enrollTimer = 0
+        self:_enrollTrucks()
+    end
+
+    -- Everything below mutates authoritative state.
+    if not self.isServer then return end
 
     self.tickTimer = self.tickTimer + dt
     self.deadlineCheckTimer = self.deadlineCheckTimer + dt
@@ -488,11 +610,14 @@ end
 
 ---Sample fuel and distance for all enrolled trucks.
 function TransportCompanyManager:_sampleTrucks(dt)
-    for uniqueId, truck in pairs(self.trucks) do
+    for _, truck in pairs(self.trucks) do
         local vehicle = truck:getVehicle()
         if vehicle ~= nil and not vehicle:getIsBeingDeleted() then
             truck:sampleFuel(vehicle, dt)
             truck:sampleDistance(vehicle)
+        elseif truck.isEnrolled then
+            -- Truck sold or deleted: stop sampling, keep the books.
+            truck.isEnrolled = false
         end
     end
 end
@@ -543,38 +668,52 @@ end
 ---@param contract TransportCompanyContract
 ---@param job table The completed AI job
 function TransportCompanyManager:_completeHiredDriverContract(contract, job)
-    if contract.state == TransportCompanyContract.STATE_COMPLETED then return end
+    if not contract:complete() then return end
 
-    -- Mark completed
-    contract:complete()
+    local truck = self.trucks[contract.acceptedTruckUniqueId]
 
-    -- Calculate the driver's share (hiredDriverRewardShare % of reward)
-    local rewardShare = self.settings.hiredDriverRewardShare or 20
+    -- Resolve the farm to pay. addMoney rejects farmId 0 outright
+    -- ("Can't change money of spectator farm", FSBaseMission.lua:2006),
+    -- so a contract with no owning farm must not reach it.
+    local farmId = contract.farmId
+    if (farmId == nil or farmId <= 0) and truck ~= nil then
+        farmId = truck.farmId
+    end
+    if farmId == nil or farmId <= 0 then
+        TransportCompanyLog.warning(
+            "Contract %s completed with no owning farm — no payout",
+            tostring(contract.contractId)
+        )
+        return
+    end
+
+    -- The driver keeps hiredDriverRewardShare % as a wage; the rest is
+    -- company revenue. Both land on the same farm balance, so they are
+    -- booked as two entries under different money types to keep the
+    -- base game finance screen honest.
+    local rewardShare = self.settings:get("hiredDriverRewardShare") or 20
     local driverCut = math.floor(contract.reward * rewardShare / 100)
     local companyRevenue = contract.reward - driverCut
 
-    -- Pay company (add to company bank)
-    local ok, err = pcall(function()
-        g_currentMission:addMoney(
-            companyRevenue, 0, MoneyType.OTHER, true, true
-        )
-    end)
-    if not ok then
-        TransportCompanyLog.error("Failed to add company revenue: %s", tostring(err))
+    self:_addMoney(companyRevenue, farmId, MoneyType.MISSIONS)
+    if driverCut > 0 then
+        self:_addMoney(-driverCut, farmId, MoneyType.AI)
     end
 
-    -- Pay driver (add to driver's farm if we can determine it)
-    -- The hired driver runs on the farm that owns the truck.
-    -- We stored the truck's farmId when the contract was accepted.
-    if contract.acceptedTruckUniqueId and contract.acceptedTruckUniqueId ~= 0 then
-        local truck = self.trucks[contract.acceptedTruckUniqueId]
-        if truck and truck.farmId and truck.farmId > 0 then
-            local ok2, err2 = pcall(function()
-                g_currentMission:addMoney(driverCut, truck.farmId, MoneyType.AI, true, true)
-            end)
-            if not ok2 then
-                TransportCompanyLog.error("Failed to add driver cut: %s", tostring(err2))
-            end
+    -- Per-truck books
+    if truck ~= nil then
+        truck:addRevenue(companyRevenue)
+        truck:addJob()
+        TransportCompanyMoneyEvent.sendEvent(
+            TransportCompanyMoneyEvent.TYPE_CONTRACT_REWARD,
+            companyRevenue, farmId, contract.contractId, truck.uniqueId
+        )
+        if driverCut > 0 then
+            truck:addExpense(driverCut)
+            TransportCompanyMoneyEvent.sendEvent(
+                TransportCompanyMoneyEvent.TYPE_HIRED_DRIVER_CUT,
+                driverCut, farmId, contract.contractId, truck.uniqueId
+            )
         end
     end
 
@@ -590,6 +729,18 @@ function TransportCompanyManager:_completeHiredDriverContract(contract, job)
     )
 end
 
+---Book money against a farm. Server-only (addMoney refuses to run on
+---a client, FSBaseMission.lua:2021) and never with farmId 0.
+---@param amount number Positive credits, negative debits
+---@param farmId number Must be > 0
+---@param moneyType table A MoneyType constant
+function TransportCompanyManager:_addMoney(amount, farmId, moneyType)
+    if not self.isServer or farmId == nil or farmId <= 0 or amount == 0 then
+        return
+    end
+    g_currentMission:addMoney(amount, farmId, moneyType, true, true)
+end
+
 -- ── Money Event Handling ──────────────────────
 
 ---Called when a TransportCompanyMoneyEvent is received (client
@@ -598,9 +749,12 @@ end
 ---@param amount number
 ---@param farmId number
 ---@param contractId string
----@param truckUniqueId number
+---@param truckUniqueId string Vehicle uniqueId (a string, not an int)
 function TransportCompanyManager:onMoneyEvent(moneyType, amount, farmId, contractId, truckUniqueId)
-    if truckUniqueId == nil or truckUniqueId == 0 then return end
+    -- The server already updated its own books before broadcasting;
+    -- applying the event there too would double-count.
+    if self.isServer then return end
+    if truckUniqueId == nil or truckUniqueId == "" then return end
 
     local truck = self.trucks[truckUniqueId]
     if truck == nil then return end
@@ -693,14 +847,10 @@ function TransportCompanyManager:_registerConsoleCommands()
 end
 
 function TransportCompanyManager:consoleCommandDebug()
-    if not self.settings.debugMode then
-        self.settings.debugMode = true
-        print("TransportCompany: debug mode ON")
-    else
-        self.settings.debugMode = false
-        print("TransportCompany: debug mode OFF")
-    end
+    local enabled = not self.settings:get("debugMode")
+    self.settings:set("debugMode", enabled)
     self.settings:save()
+    print("TransportCompany: debug mode " .. (enabled and "ON" or "OFF"))
 end
 
 function TransportCompanyManager:consoleCommandGenerateContract()
@@ -709,7 +859,9 @@ function TransportCompanyManager:consoleCommandGenerateContract()
         return
     end
 
-    local contract = TransportCompanyContract.generate()
+    local contract = TransportCompanyContract.generate(
+        self.settings:get("contractDeadlineDays") or 7
+    )
     if contract then
         self.contracts[contract.contractId] = contract
         TransportCompanyContractEvent.sendEvent(

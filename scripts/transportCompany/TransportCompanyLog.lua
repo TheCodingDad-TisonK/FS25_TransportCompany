@@ -10,8 +10,11 @@ TransportCompanyLog = {}
 
 local PREFIX = "[TransportCompany]"
 
+-- Settings live in settings.config and must be read through :get();
+-- reading settings.debugMode as a field always yields nil.
 function TransportCompanyLog.debug(msg, ...)
-    if g_transportCompanyManager and g_transportCompanyManager.settings and g_transportCompanyManager.settings.debugMode then
+    if g_transportCompanyManager and g_transportCompanyManager.settings
+       and g_transportCompanyManager.settings:get("debugMode") then
         local success, formatted = pcall(string.format, PREFIX .. " DEBUG: " .. msg, ...)
         print(success and formatted or (PREFIX .. " DEBUG: " .. tostring(msg)))
     end

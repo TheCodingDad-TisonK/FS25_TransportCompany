@@ -76,7 +76,7 @@ function TransportCompanyHq:onPostFinalizePlacement()
     -- The manager decides what to update (PDA availability, contract
     -- board, hints); it works the same on server and client.
     if g_transportCompanyManager ~= nil then
-        g_transportCompanyManager:onHqChanged(self)
+        g_transportCompanyManager:onHqChanged(self, spec.isActive)
     end
 end
 
@@ -89,7 +89,7 @@ function TransportCompanyHq:onSell()
     spec.isActive = false
 
     if g_transportCompanyManager ~= nil then
-        g_transportCompanyManager:onHqChanged(self)
+        g_transportCompanyManager:onHqChanged(self, spec.isActive)
     end
 end
 
@@ -106,6 +106,6 @@ function TransportCompanyHq:onDelete()
     self[TransportCompanyHq.SPEC_TABLE_NAME] = nil
 
     if wasActive and g_transportCompanyManager ~= nil then
-        g_transportCompanyManager:onHqChanged(self)
+        g_transportCompanyManager:onHqChanged(self, spec.isActive)
     end
 end
