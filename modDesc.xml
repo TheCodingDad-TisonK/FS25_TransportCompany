@@ -53,11 +53,6 @@ Es ist keinerlei Vorbereitung der Karte noetig.
     <iconFilename>textures/icon_FS25_TransportCompany.dds</iconFilename>
     <multiplayer supported="true"/>
 
-    <!-- Register the brand so the shop stops falling back to LIZARD -->
-    <brands>
-        <brand name="TISONK" title="TisonK" image="textures/brand_tisonk.dds"/>
-    </brands>
-
     <storeItems>
         <storeItem xmlFilename="dataS/placeables/transportCompanyHq/transportCompanyHq.xml"/>
     </storeItems>
