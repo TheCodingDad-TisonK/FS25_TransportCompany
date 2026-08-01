@@ -31,13 +31,15 @@ local InGameMenuTransportCompanyFrame_mt = Class(InGameMenuTransportCompanyFrame
 InGameMenuTransportCompanyFrame.TAB_DISPATCH = 1
 InGameMenuTransportCompanyFrame.TAB_FLEET = 2
 InGameMenuTransportCompanyFrame.TAB_LEDGER = 3
+InGameMenuTransportCompanyFrame.TAB_SETTINGS = 4
 
 -- Bare l10n keys. g_i18n:getText expects the key itself — the
 -- "$l10n_" prefix is only for XML attribute values.
 InGameMenuTransportCompanyFrame.TAB_NAMES = {
     "transportCompany_tabDispatch",
     "transportCompany_tabFleet",
-    "transportCompany_tabLedger"
+    "transportCompany_tabLedger",
+    "transportCompany_tabSettings"
 }
 
 function InGameMenuTransportCompanyFrame.new(target, custom_mt)
@@ -71,6 +73,20 @@ function InGameMenuTransportCompanyFrame:initialize()
         text = g_i18n:getText("transportCompany_hireDriver"),
         callback = function()
             self:onButtonHire()
+        end
+    }
+    self.changeButtonInfo = {
+        inputAction = InputAction.MENU_ACTIVATE,
+        text = g_i18n:getText("transportCompany_settingChange"),
+        callback = function()
+            self:onButtonChangeSetting()
+        end
+    }
+    self.resetButtonInfo = {
+        inputAction = InputAction.MENU_EXTRA_1,
+        text = g_i18n:getText("transportCompany_settingReset"),
+        callback = function()
+            self:onButtonResetSetting()
         end
     }
 
@@ -166,6 +182,8 @@ function InGameMenuTransportCompanyFrame:updateTabContent()
             self:_buildFleetRows(manager)
         elseif self.currentTab == InGameMenuTransportCompanyFrame.TAB_LEDGER then
             self:_buildLedgerRows(manager)
+        elseif self.currentTab == InGameMenuTransportCompanyFrame.TAB_SETTINGS then
+            self:_buildSettingsRows(manager)
         end
     end
 
@@ -195,10 +213,15 @@ function InGameMenuTransportCompanyFrame:_updateEmptyText(manager)
     if self.emptyText == nil then return end
 
     local key = "transportCompany_noContracts"
-    if manager == nil or not manager:_hasHq() then
+    if self.currentTab == InGameMenuTransportCompanyFrame.TAB_SETTINGS then
+        -- Settings never depend on owning an HQ.
+        key = "transportCompany_tabSettings"
+    elseif manager == nil or not manager:_hasHq() then
         key = "transportCompany_noHq"
     elseif self.currentTab == InGameMenuTransportCompanyFrame.TAB_FLEET then
         key = "transportCompany_fleetNoTrucks"
+    elseif self.currentTab == InGameMenuTransportCompanyFrame.TAB_LEDGER then
+        key = "transportCompany_noHistory"
     end
     self.emptyText:setText(g_i18n:getText(key))
 end
@@ -224,10 +247,17 @@ end
 function InGameMenuTransportCompanyFrame:_updateMenuButtons()
     local buttons = { self.backButtonInfo }
 
-    local contract = self:getSelectedContract()
-    if contract ~= nil and contract.state == TransportCompanyContract.STATE_AVAILABLE then
-        table.insert(buttons, self.acceptButtonInfo)
-        table.insert(buttons, self.hireButtonInfo)
+    if self.currentTab == InGameMenuTransportCompanyFrame.TAB_SETTINGS then
+        if self:getSelectedSetting() ~= nil then
+            table.insert(buttons, self.changeButtonInfo)
+            table.insert(buttons, self.resetButtonInfo)
+        end
+    else
+        local contract = self:getSelectedContract()
+        if contract ~= nil and contract.state == TransportCompanyContract.STATE_AVAILABLE then
+            table.insert(buttons, self.acceptButtonInfo)
+            table.insert(buttons, self.hireButtonInfo)
+        end
     end
 
     self:setMenuButtonInfo(buttons)
@@ -321,37 +351,58 @@ function InGameMenuTransportCompanyFrame:_buildFleetRows(manager)
     end
 end
 
----Ledger tab: company totals as label/value rows.
+---Ledger tab: a company summary entry followed by finished jobs.
 ---
----Revenue, wages and job count come from the company ledger, not from
----summing the fleet: a contract the player hauls personally cannot be
----attributed to a truck, so the per-truck books would under-report it.
----Fuel and distance are genuinely per-truck and are summed.
+---This list used to repeat the very same figures the detail panel was
+---already showing. It now indexes the panel instead: pick the summary
+---for company totals, or any past job to see how it went.
 function InGameMenuTransportCompanyFrame:_buildLedgerRows(manager)
-    local totalFuel, totalDistance = 0, 0
-    for _, truck in pairs(manager.trucks) do
-        totalFuel = totalFuel + truck.fuelCost
-        totalDistance = totalDistance + truck.distanceM
+    table.insert(self.rows, {
+        cellName = "row",
+        summary  = true,
+        primary  = g_i18n:getText("transportCompany_companySummary"),
+        left     = g_i18n:formatMoney(
+            manager.ledger.revenue - manager.ledger.driverWages, 0, true, true),
+        right    = string.format("%d", manager.ledger.jobs),
+    })
+
+    -- Newest first; pairs order is undefined so this has to be sorted.
+    local history = {}
+    for _, contract in pairs(manager.contracts) do
+        if contract.state == TransportCompanyContract.STATE_COMPLETED or
+           contract.state == TransportCompanyContract.STATE_EXPIRED then
+            table.insert(history, contract)
+        end
     end
+    table.sort(history, function(a, b)
+        return (a.completedTime or 0) > (b.completedTime or 0)
+    end)
 
-    local ledger = manager.ledger
-    local money = function(v) return g_i18n:formatMoney(v, 0, true, true) end
-
-    local entries = {
-        { "transportCompany_totalRevenue",  money(ledger.revenue) },
-        { "transportCompany_totalFuel",     money(totalFuel) },
-        { "transportCompany_totalWages",    money(ledger.driverWages) },
-        { "transportCompany_totalDistance", g_i18n:formatDistance(totalDistance, 1) },
-        { "transportCompany_totalJobs",     tostring(ledger.jobs) },
-        { "transportCompany_totalProfit",
-          money(ledger.revenue - ledger.driverWages - totalFuel) },
-    }
-    for _, e in ipairs(entries) do
+    for _, contract in ipairs(history) do
+        local done = contract.state == TransportCompanyContract.STATE_COMPLETED
+        local fillType = g_fillTypeManager:getFillTypeByIndex(contract.fillTypeIndex)
         table.insert(self.rows, {
             cellName = "row",
-            primary  = g_i18n:getText(e[1]),
-            left     = "",
-            right    = e[2],
+            contract = contract,
+            icon     = fillType ~= nil and fillType.hudOverlayFilename or nil,
+            primary  = contract:getLocalizedFillType(),
+            left     = done and g_i18n:formatMoney(contract.reward, 0, true, true) or "",
+            right    = g_i18n:getText(done and "transportCompany_statusCompleted"
+                                           or "transportCompany_statusExpired"),
+        })
+    end
+end
+
+---Settings tab: one row per setting, value on the right.
+function InGameMenuTransportCompanyFrame:_buildSettingsRows(manager)
+    for _, def in ipairs(TransportCompanySettings.definitions) do
+        table.insert(self.rows, {
+            cellName = "row",
+            setting  = def,
+            primary  = g_i18n:getText(TransportCompanySettings.getLabelKey(def.id)),
+            left     = TransportCompanySettings.getIsEditable(def) and "" or
+                       g_i18n:getText("transportCompany_settingLocal"),
+            right    = manager.settings:getDisplayValue(def.id),
         })
     end
 end
@@ -384,7 +435,9 @@ function InGameMenuTransportCompanyFrame:_rebuildDetail()
     local row = self.rows[index]
     local hasDetail = false
 
-    if self.currentTab == InGameMenuTransportCompanyFrame.TAB_LEDGER then
+    if row ~= nil and row.setting ~= nil then
+        hasDetail = self:_buildSettingDetail(row.setting)
+    elseif row ~= nil and row.summary then
         hasDetail = self:_buildCompanyDetail()
     elseif row ~= nil and row.contract ~= nil then
         hasDetail = self:_buildContractDetail(row.contract)
@@ -517,6 +570,110 @@ function InGameMenuTransportCompanyFrame:_buildCompanyDetail()
     self:_setProgress(0, "")
     self:_setReward("transportCompany_ledgerProfit", money(profit))
     return true
+end
+
+---Detail panel for one setting: what it does, and what it accepts.
+function InGameMenuTransportCompanyFrame:_buildSettingDetail(def)
+    local manager = TransportCompanyManager.getInstance()
+    if manager == nil then
+        return false
+    end
+
+    if self.detailTitle ~= nil then
+        self.detailTitle:setText(
+            g_i18n:getText(TransportCompanySettings.getLabelKey(def.id)))
+    end
+    if self.detailSubtitle ~= nil then
+        self.detailSubtitle:setText(
+            g_i18n:getText(TransportCompanySettings.getDescriptionKey(def.id)))
+    end
+
+    self:_addDetail("transportCompany_settingCurrent",
+        manager.settings:getDisplayValue(def.id))
+
+    local default = def.default
+    if def.type == "boolean" then
+        default = g_i18n:getText(default and "transportCompany_on"
+                                         or "transportCompany_off")
+    end
+    self:_addDetail("transportCompany_settingDefault", tostring(default))
+
+    if def.type == "number" and def.min ~= nil and def.max ~= nil then
+        self:_addDetail("transportCompany_settingRange",
+            string.format("%d - %d", def.min, def.max))
+    end
+
+    self:_addDetail("transportCompany_settingScope",
+        g_i18n:getText(def.localOnly and "transportCompany_settingLocal"
+                                     or "transportCompany_settingShared"))
+
+    if not TransportCompanySettings.getIsEditable(def) then
+        self:_addDetail("transportCompany_contractStatus",
+            g_i18n:getText("transportCompany_settingReadOnly"))
+    end
+
+    self:_setProgress(0, "")
+    self:_setReward("transportCompany_settingCurrent",
+        manager.settings:getDisplayValue(def.id))
+    return true
+end
+
+---The setting under the cursor, when the Settings tab is open.
+function InGameMenuTransportCompanyFrame:getSelectedSetting()
+    if self.contentList == nil then
+        return nil
+    end
+    local row = self.rows[self.contentList.selectedIndex]
+    return row ~= nil and row.setting or nil
+end
+
+function InGameMenuTransportCompanyFrame:onButtonChangeSetting()
+    self:_applySettingChange(function(settings, def)
+        return settings:cycle(def.id, 1)
+    end)
+end
+
+function InGameMenuTransportCompanyFrame:onButtonResetSetting()
+    self:_applySettingChange(function(settings, def)
+        return settings:set(def.id, def.default)
+    end)
+end
+
+---Apply a change to the highlighted setting and persist it.
+---
+---Server-shared values are refused on a client: editing them locally
+---would leave that player quietly disagreeing with the server about
+---board size, deadlines and wages.
+function InGameMenuTransportCompanyFrame:_applySettingChange(fn)
+    local def = self:getSelectedSetting()
+    if def == nil then
+        return
+    end
+
+    local manager = TransportCompanyManager.getInstance()
+    if manager == nil then
+        return
+    end
+
+    if not TransportCompanySettings.getIsEditable(def) then
+        manager:_notify(g_i18n:getText("transportCompany_settingReadOnly"))
+        return
+    end
+
+    fn(manager.settings, def)
+    manager.settings:save()
+
+    -- Board size and deadline take effect immediately.
+    if manager.isServer then
+        manager:_regenerateContractBoard()
+    end
+
+    local index = self.contentList ~= nil and self.contentList.selectedIndex or 1
+    self:updateTabContent()
+    if self.contentList ~= nil and #self.rows >= index then
+        self.contentList:setSelectedItem(1, index, false, true)
+        self:_updateDetail()
+    end
 end
 
 function InGameMenuTransportCompanyFrame:_buildTruckDetail(truck)

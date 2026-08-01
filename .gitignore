@@ -2,3 +2,9 @@
 *.zip
 __pycache__/
 *.pyc
+
+# Icon pipeline: icon_source.png is the master artwork; applyIconBg
+# composites it onto the FS25 background and dds.py encodes the result
+# to textures/icon.dds, which is what modDesc ships. The intermediate
+# PNG is not needed in the repo or the zip.
+textures/icon.png

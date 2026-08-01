@@ -404,6 +404,34 @@ end
 -- for it, so the job is actually haulable when it appears.
 TransportCompanyContract.MIN_SOURCE_LITERS = 1000
 
+---How much of a fill type a station physically holds.
+---
+---LoadingStation:getFillLevel gates every source storage on
+---hasFarmAccessToStorage (LoadingStation.lua:110), so a map-owned
+---elevator reports 0 to the player's farm and, with farmId 0, so does
+---everything. Using it to decide whether a job exists meant no
+---contracts were generated at all. Contract generation only cares
+---whether the goods are physically there; access is the AI job's
+---problem and validate() reports it properly at hire time.
+---@return number liters
+function TransportCompanyContract.getStationStock(station, fillTypeIndex, farmId)
+    if station.sourceStorages ~= nil then
+        local total = 0
+        for _, storage in pairs(station.sourceStorages) do
+            if storage.getFillLevel ~= nil then
+                total = total + (storage:getFillLevel(fillTypeIndex) or 0)
+            end
+        end
+        return total
+    end
+    -- Stations without source storages (a shop that conjures goods)
+    -- fall back to the access-aware query.
+    if station.getFillLevel ~= nil and farmId ~= nil and farmId > 0 then
+        return station:getFillLevel(fillTypeIndex, farmId) or 0
+    end
+    return 0
+end
+
 ---@param deadlineDays number|nil Deadline in game days (default 3)
 ---@param farmId number|nil Farm the board belongs to, for stock access
 function TransportCompanyContract.generate(deadlineDays, farmId)
@@ -432,7 +460,8 @@ function TransportCompanyContract.generate(deadlineDays, farmId)
             if fillTypes ~= nil then
                 for fillTypeIndex, _ in pairs(fillTypes) do
                     if fillTypeIndex ~= FillType.UNKNOWN then
-                        local available = station:getFillLevel(fillTypeIndex, farmId) or 0
+                        local available = TransportCompanyContract.getStationStock(
+                            station, fillTypeIndex, farmId)
                         if available >= TransportCompanyContract.MIN_SOURCE_LITERS then
                             table.insert(loadingStations, {
                                 ["station"] = station,

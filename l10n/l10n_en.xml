@@ -81,5 +81,32 @@
         <e k="transportCompany_gameplayHint" v="Transport Company: accept freight contracts from the dispatch board in the PDA. Trucks earn revenue per job and fuel costs are charged to the truck's ledger. A truck is any vehicle classified as a truck in the base game; it needs a trailer to haul bulk or pallet freight."/>
         <e k="transportCompany_hint_dispatch" v="Transport Company: accept freight contracts from the dispatch board in the PDA. Assign a truck or hire a driver to haul the load."/>
         <e k="transportCompany_hint_fleet" v="Transport Company: your fleet's revenue, fuel costs, and profit are tracked per truck in the Fleet and Ledger tabs of the dispatch office."/>
+        <e k="transportCompany_tabSettings" v="Settings"/>
+        <e k="transportCompany_companySummary" v="Company summary"/>
+        <e k="transportCompany_ledgerHistory" v="Completed jobs"/>
+        <e k="transportCompany_noHistory" v="No completed jobs yet. Finished and expired contracts are listed here."/>
+        <e k="transportCompany_settingChange" v="Change"/>
+        <e k="transportCompany_settingReset" v="Reset"/>
+        <e k="transportCompany_settingCurrent" v="Current"/>
+        <e k="transportCompany_settingDefault" v="Default"/>
+        <e k="transportCompany_settingRange" v="Range"/>
+        <e k="transportCompany_settingScope" v="Applies to"/>
+        <e k="transportCompany_settingShared" v="Whole server"/>
+        <e k="transportCompany_settingLocal" v="This player only"/>
+        <e k="transportCompany_settingReadOnly" v="Only the server can change this setting."/>
+        <e k="transportCompany_on" v="On"/>
+        <e k="transportCompany_off" v="Off"/>
+        <e k="transportCompany_setting_enabled" v="Company enabled"/>
+        <e k="transportCompany_settingDesc_enabled" v="Master switch. When off, no contracts are generated and no truck keeps books."/>
+        <e k="transportCompany_setting_maxActiveContracts" v="Contracts on the board"/>
+        <e k="transportCompany_settingDesc_maxActiveContracts" v="How many open jobs the dispatch board holds at once. A freed slot refills automatically."/>
+        <e k="transportCompany_setting_contractDeadlineDays" v="Deadline (days)"/>
+        <e k="transportCompany_settingDesc_contractDeadlineDays" v="How long you have to deliver once a contract is accepted. The clock starts on accept."/>
+        <e k="transportCompany_setting_hiredDriverRewardShare" v="Driver wage share (%)"/>
+        <e k="transportCompany_settingDesc_hiredDriverRewardShare" v="Percentage of the reward a hired driver keeps. The company banks the rest."/>
+        <e k="transportCompany_setting_showNotifications" v="Notifications"/>
+        <e k="transportCompany_settingDesc_showNotifications" v="Show a message when a contract is accepted, delivered or expires."/>
+        <e k="transportCompany_setting_debugMode" v="Debug logging"/>
+        <e k="transportCompany_settingDesc_debugMode" v="Verbose output in log.txt. Saved per player, off by default."/>
     </elements>
 </l10n>

@@ -17,7 +17,7 @@ ZIP_PATH = MOD_DIR / f"{MOD_NAME}.zip"
 # Windows default mods path
 MODS_DIR = Path.home() / "Documents" / "My Games" / "FarmingSimulator2025" / "mods"
 
-EXCLUDE_DIRS = {".git", ".github", "__MACOSX", "tools", ".vscode", "__pycache__"}
+EXCLUDE_DIRS = {".git", ".github", "__MACOSX", "tools", "tests", ".vscode", "__pycache__"}
 EXCLUDE_EXTS = {".sh", ".py", ".md", ".DS_Store", ".zip", ".ps1"}
 EXCLUDE_FILES = {".gitignore", "icon_source.png"}
 

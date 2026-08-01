@@ -27,12 +27,12 @@ v1.0.0.0 - ModHub-ready release
 
     <version>1.0.0.0</version>
     <author>TisonK</author>
-    <iconFilename>textures/icon.png</iconFilename>
+    <iconFilename>textures/icon.dds</iconFilename>
     <multiplayer supported="true"/>
 
     <!-- Register the brand so the shop stops falling back to LIZARD -->
     <brands>
-        <brand name="TISONK" title="TisonK"/>
+        <brand name="TISONK" title="TisonK" image="textures/brand_tisonk.png"/>
     </brands>
 
     <storeItems>

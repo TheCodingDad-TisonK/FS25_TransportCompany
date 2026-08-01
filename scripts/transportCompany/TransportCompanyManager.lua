@@ -154,8 +154,12 @@ function TransportCompanyManager:_onMissionLoaded()
     -- path in this file.
     self.settings:loadSettings()
 
-    -- Restore contracts from savegame (if any)
-    self:_loadContracts()
+    -- Contracts and the HQ scan deliberately do NOT run here.
+    -- loadMission00Finished fires before placeables are instantiated,
+    -- so the placeable and storage systems are still empty: every saved
+    -- contract failed to resolve its stations and was discarded
+    -- ("Loaded 0 contracts (5 dropped)"), and the HQ scan found
+    -- nothing. Both happen in _onMissionStarted instead.
 
     -- Register PDA page (client only — g_gui is client-side)
     if g_gui ~= nil then
@@ -165,21 +169,28 @@ function TransportCompanyManager:_onMissionLoaded()
     -- Register intro hints (appear in base Settings → Gameplay → Hints)
     self:_registerHints()
 
-    -- Notify HQ specs that manager is ready (idempotent)
-    if g_transportCompanyManager ~= nil and TransportCompanyHq ~= nil then
-        for _, placeable in pairs(g_currentMission.placeableSystem.placeables) do
-            if placeable ~= nil and SpecializationUtil.hasSpecialization(
-                TransportCompanyHq, placeable.specializations
-            ) then
-                -- Placeables found by this scan exist and are live.
-                self:onHqChanged(placeable, true)
-            end
-        end
-    end
-
     TransportCompanyLog.info(
         "TransportCompanyManager: _onMissionLoaded() complete"
     )
+end
+
+---Find HQs that already exist in the world and register them.
+---Runs once the world is up, not at load: see _onMissionLoaded.
+function TransportCompanyManager:_scanForHqs()
+    if g_currentMission == nil or g_currentMission.placeableSystem == nil then
+        return
+    end
+    if TransportCompanyHq == nil then
+        return
+    end
+    for _, placeable in pairs(g_currentMission.placeableSystem.placeables) do
+        if placeable ~= nil and SpecializationUtil.hasSpecialization(
+            TransportCompanyHq, placeable.specializations
+        ) then
+            -- Placeables found by this scan exist and are live.
+            self:onHqChanged(placeable, true)
+        end
+    end
 end
 
 ---Called at Mission00.onStartMission (player is in the world,
@@ -192,8 +203,15 @@ function TransportCompanyManager:_onMissionStarted()
         return
     end
 
+    -- The world exists by now, so stations and placeables resolve.
+    self:_loadContracts()
+    self:_scanForHqs()
+
     -- Build the fleet roster everywhere; only the server samples it.
     self:_startTruckSampling()
+
+    -- Fill the board if the save had none and an HQ is already standing.
+    self:_regenerateContractBoard()
 
     -- Subscribe to AI job completion (hired-driver delivery).
     -- MessageCenter:subscribe returns nothing (MessageCenter.lua:27-49),
@@ -436,7 +454,10 @@ end
 ---presence. Called on HQ change and on a timer.
 function TransportCompanyManager:_regenerateContractBoard()
     if not self.isServer then return end
-    if not self:_hasHq() then return end
+    if not self:_hasHq() then
+        TransportCompanyLog.debug("board: no HQ, nothing generated")
+        return
+    end
 
     local maxActive = self.settings:get("maxActiveContracts") or 5
     local activeCount = 0
@@ -459,6 +480,15 @@ function TransportCompanyManager:_regenerateContractBoard()
         -- Broadcast the new contract to all clients
         TransportCompanyContractEvent.sendEvent(
             TransportCompanyContractEvent.TYPE_ADD, contract
+        )
+    end
+
+    if activeCount < maxActive then
+        -- Generation gave up early: usually no source station holds
+        -- enough of anything, or no destination accepts it.
+        TransportCompanyLog.info(
+            "board: %d/%d contracts (generation found no further route; farm %s)",
+            activeCount, maxActive, tostring(boardFarmId)
         )
     end
 end

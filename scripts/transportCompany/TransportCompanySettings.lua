@@ -76,6 +76,7 @@ TransportCompanySettings.definitions = {
         default = 20,
         min = 0,
         max = 100,
+        step = 5,
         -- Percent of the contract reward a hired driver (AI job) keeps
         -- for themselves. The company bank receives the rest. 0 means
         -- drivers haul for free (only the vehicle running costs count).
@@ -319,4 +320,67 @@ function TransportCompanySettings:saveLocalSettings()
     xml:save()
     xml:delete()
     return true
+end
+
+-- ── UI helpers ──────────────────────────────────────────────
+-- Label and description keys follow a fixed convention so the PDA can
+-- render any setting without a second table to keep in sync.
+
+function TransportCompanySettings.getLabelKey(id)
+    return "transportCompany_setting_" .. id
+end
+
+function TransportCompanySettings.getDescriptionKey(id)
+    return "transportCompany_settingDesc_" .. id
+end
+
+--- Human readable value for a setting.
+function TransportCompanySettings:getDisplayValue(id)
+    local def = TransportCompanySettings.byId[id]
+    if def == nil then
+        return ""
+    end
+    local value = self:get(id)
+    if def.type == "boolean" then
+        return g_i18n:getText(value and "transportCompany_on" or "transportCompany_off")
+    end
+    return tostring(value)
+end
+
+--- Step a setting to its next value: booleans flip, numbers advance by
+--- one step and wrap back to min past the top.
+---@return boolean changed
+function TransportCompanySettings:cycle(id, direction)
+    local def = TransportCompanySettings.byId[id]
+    if def == nil then
+        return false
+    end
+
+    if def.type == "boolean" then
+        self:set(id, not self:get(id))
+        return true
+    end
+
+    local step = def.step or 1
+    local value = (tonumber(self:get(id)) or def.default) + step * (direction or 1)
+    if def.max ~= nil and value > def.max then
+        value = def.min or def.default
+    elseif def.min ~= nil and value < def.min then
+        value = def.max or def.default
+    end
+    self:set(id, value)
+    return true
+end
+
+--- Can this process change the setting?
+--- Server-shared values are server-authoritative: a client editing them
+--- locally would silently disagree with everyone else.
+function TransportCompanySettings.getIsEditable(def)
+    if def == nil then
+        return false
+    end
+    if def.localOnly then
+        return true
+    end
+    return g_server ~= nil
 end
