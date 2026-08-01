@@ -45,7 +45,7 @@ function TransportCompanyManager.new(modDirectory, modName)
 
     -- Sub-systems
     self.settings = TransportCompanySettings.new()
-    self.truckRegistry = TransportCompanyTruckRegistry.new()
+    self.trucks = {}          -- uniqueId → TransportCompanyTruck
     self.contracts = {}       -- contractId → TransportCompanyContract
     self.hqPlaceables = {}    -- placeableUniqueId → placeable ref
 
@@ -202,7 +202,7 @@ function TransportCompanyManager:_onDeleteMission()
 
     self.contracts = {}
     self.hqPlaceables = {}
-    self.truckRegistry:clear()
+    self.trucks = {}
     self.isMissionLoaded = false
 end
 
@@ -437,7 +437,7 @@ end
 
 ---Sample fuel and distance for all enrolled trucks.
 function TransportCompanyManager:_sampleTrucks(dt)
-    for uniqueId, truck in pairs(self.truckRegistry.trucks) do
+    for uniqueId, truck in pairs(self.trucks) do
         local vehicle = truck:getVehicle()
         if vehicle ~= nil and not vehicle:getIsBeingDeleted() then
             truck:sampleFuel(vehicle, dt)
@@ -516,7 +516,7 @@ function TransportCompanyManager:_completeHiredDriverContract(contract, job)
     -- The hired driver runs on the farm that owns the truck.
     -- We stored the truck's farmId when the contract was accepted.
     if contract.acceptedTruckUniqueId and contract.acceptedTruckUniqueId ~= 0 then
-        local truck = self.truckRegistry:getTruck(contract.acceptedTruckUniqueId)
+        local truck = self.trucks[contract.acceptedTruckUniqueId]
         if truck and truck.farmId and truck.farmId > 0 then
             local ok2, err2 = pcall(function()
                 g_currentMission:addMoney(driverCut, truck.farmId, MoneyType.AI, true, true)
@@ -551,7 +551,7 @@ end
 function TransportCompanyManager:onMoneyEvent(moneyType, amount, farmId, contractId, truckUniqueId)
     if truckUniqueId == nil or truckUniqueId == 0 then return end
 
-    local truck = self.truckRegistry:getTruck(truckUniqueId)
+    local truck = self.trucks[truckUniqueId]
     if truck == nil then return end
 
     if moneyType == TransportCompanyMoneyEvent.TYPE_CONTRACT_REWARD then
@@ -692,7 +692,7 @@ end
 
 function TransportCompanyManager:consoleCommandListTrucks()
     local count = 0
-    for uniqueId, truck in pairs(self.truckRegistry.trucks) do
+    for uniqueId, truck in pairs(self.trucks) do
         count = count + 1
         print(string.format(
             "  %s (%s): revenue=%d fuel=%d dist=%d jobs=%d profit=%d",
