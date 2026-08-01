@@ -1383,6 +1383,13 @@ function TransportCompanyManager:_registerConsoleCommands()
     )
 
     addConsoleCommand(
+        "tc_stations",
+        "List every loading station, its stock and whether the AI can load there",
+        "consoleCommandStations",
+        self
+    )
+
+    addConsoleCommand(
         "tc_reset_board",
         "Clear every contract and regenerate the dispatch board",
         "consoleCommandResetBoard",
@@ -1457,6 +1464,88 @@ function TransportCompanyManager:consoleCommandListTrucks()
         ))
     end
     print(string.format("TransportCompany: %d trucks enrolled", count))
+end
+
+---Dump every loading station the map offers, with the two facts that
+---decide whether a hired driver can ever run a job from it.
+---
+---A route is AI-haulable only when the station has a load trigger
+---flagged for AI loading (LoadingStation.lua:145-149) AND the farm can
+---draw stock from it (getFillLevel is access gated). Neither can be
+---manufactured by this mod, so when "Hire driver" is never available
+---this says which of the two is missing.
+function TransportCompanyManager:consoleCommandStations()
+    local storageSystem = g_currentMission ~= nil and g_currentMission.storageSystem
+    if storageSystem == nil then
+        print("TransportCompany: no storage system")
+        return
+    end
+
+    local farmId = self:_getCompanyFarmId()
+    if farmId <= 0 then
+        farmId = g_currentMission:getFarmId()
+    end
+    print(string.format("TransportCompany: loading stations (farm %s)", tostring(farmId)))
+
+    local stations, routes, aiTriggered, haulable = 0, 0, 0, 0
+    for station, _ in pairs(storageSystem.loadingStations) do
+        if station ~= nil then
+            stations = stations + 1
+            local fillTypes = station:getSupportedFillTypes() or {}
+            local owner = station.owningPlaceable ~= nil
+                and station.owningPlaceable:getOwnerFarmId() or "-"
+            local anyAiTrigger = false
+            local lines = {}
+
+            for fillTypeIndex, _ in pairs(fillTypes) do
+                if fillTypeIndex ~= FillType.UNKNOWN then
+                    routes = routes + 1
+                    local aiType = station.getIsFillTypeAISupported ~= nil
+                        and station:getIsFillTypeAISupported(fillTypeIndex) or false
+                    local physical = TransportCompanyContract.getStationStock(
+                        station, fillTypeIndex, farmId)
+                    local reachable = station.getFillLevel ~= nil
+                        and (station:getFillLevel(fillTypeIndex, farmId) or 0) or 0
+                    if aiType then
+                        anyAiTrigger = true
+                    end
+                    if aiType and reachable > 0 then
+                        haulable = haulable + 1
+                    end
+                    table.insert(lines, string.format(
+                        "      %-22s physical=%-10d reachable=%-10d aiLoadable=%s",
+                        g_fillTypeManager:getFillTypeNameByIndex(fillTypeIndex) or "?",
+                        physical, reachable, tostring(aiType)))
+                end
+            end
+
+            if #lines > 0 then
+                if anyAiTrigger then
+                    aiTriggered = aiTriggered + 1
+                end
+                print(string.format("  %-34s owner=%s placeable=%s",
+                    station:getName() or "?", tostring(owner),
+                    tostring(station.owningPlaceable ~= nil)))
+                for _, line in ipairs(lines) do
+                    print(line)
+                end
+            end
+        end
+    end
+
+    print(string.format(
+        "TransportCompany: %d stations, %d routes, %d stations with an AI load "
+        .. "trigger, %d routes a driver could run now",
+        stations, routes, aiTriggered, haulable))
+    if haulable == 0 then
+        if aiTriggered == 0 then
+            print("TransportCompany: no station on this map has an AI-capable load "
+                .. "trigger, so hired drivers cannot load anywhere. Haul in person.")
+        else
+            print("TransportCompany: stations support AI loading but hold nothing "
+                .. "your farm can draw. Fill a silo you own and routes will appear.")
+        end
+    end
 end
 
 ---Throw the whole board away and build a fresh one. Useful after a

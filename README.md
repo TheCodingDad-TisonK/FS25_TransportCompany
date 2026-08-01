@@ -119,6 +119,8 @@ Available with the developer console enabled.
 | `tc_list_contracts` | List ids, states and progress |
 | `tc_list_trucks` | List what actually enrolled |
 | `tc_reset_settings` | Reset settings to defaults |
+| `tc_stations` | List every loading station, its stock and whether the AI can load there |
+| `tc_reset_board` | Clear the board and regenerate it |
 
 `tc_list_trucks` is the quickest way to confirm whether a vehicle qualifies as a truck.
 
