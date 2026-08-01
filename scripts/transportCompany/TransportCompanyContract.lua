@@ -57,6 +57,13 @@ TransportCompanyContract.REWARD_PER_OBJECT = 350
 -- this is a deliberate fixed assumption rather than a lookup.
 TransportCompanyContract.LITERS_PER_PALLET = 1000
 
+-- Bumped whenever generation changes in a way that makes older saved
+-- contracts unplayable. Contracts written by an earlier generator are
+-- dropped on load rather than sitting on the board failing forever:
+-- before this existed, a save carried five jobs whose source stations
+-- could not supply them, and every hire attempt was refused.
+TransportCompanyContract.GENERATOR_VERSION = 2
+
 ---@class TransportCompanyContract
 TransportCompanyContract_mt = Class(TransportCompanyContract)
 
@@ -94,6 +101,7 @@ function TransportCompanyContract.new()
     self.isHiredDriver = false
     self.hiredDriverJobId = 0        -- base game AI job id while driving
     self.completedTime = 0
+    self.generatorVersion = TransportCompanyContract.GENERATOR_VERSION
     return self
 end
 
@@ -171,6 +179,7 @@ function TransportCompanyContract:saveToXMLFile(xmlFile, key)
     xmlFile:setBool(key .. "#isHiredDriver", self.isHiredDriver)
     xmlFile:setInt(key .. "#hiredDriverJobId", self.hiredDriverJobId or 0)
     xmlFile:setFloat(key .. "#completedTime", self.completedTime or 0)
+    xmlFile:setInt(key .. "#generatorVersion", self.generatorVersion or 0)
 end
 
 ---Load contract data from XML (instance method — populates self).
@@ -196,6 +205,8 @@ function TransportCompanyContract:loadFromXMLFile(xmlFile, key)
     self.isHiredDriver = xmlFile:getBool(key .. "#isHiredDriver", false)
     self.hiredDriverJobId = xmlFile:getInt(key .. "#hiredDriverJobId", 0)
     self.completedTime = xmlFile:getFloat(key .. "#completedTime", 0)
+    -- absent on contracts written before versioning existed
+    self.generatorVersion = xmlFile:getInt(key .. "#generatorVersion", 0)
 end
 
 ---Validate the saved station references against the live world.
@@ -294,6 +305,40 @@ function TransportCompanyContract:getIsExpired(now)
         return false
     end
     return self.deadline - now <= 0
+end
+
+--- Can the base game AI actually run this job for a farm?
+---
+--- AIParameterLoadingStation:validate applies two tests my generation
+--- does not: the fill type has to be AI-supported (a narrower set than
+--- getSupportedFillTypes), and getFillLevel is farm-access gated. A
+--- station can hold plenty and still be "empty" to a given farm, which
+--- is why hiring failed on contracts that looked perfectly fine.
+---@return boolean haulable, string|nil reasonKey
+function TransportCompanyContract:getIsAiHaulable(farmId)
+    if farmId == nil or farmId <= 0 then
+        return false, "transportCompany_hireNoFarm"
+    end
+
+    local source = self:getSourceStation()
+    if source == nil then
+        return false, "transportCompany_hireNoStation"
+    end
+    if self:getDestStation() == nil then
+        return false, "transportCompany_hireNoStation"
+    end
+
+    if source.getIsFillTypeAISupported ~= nil
+       and not source:getIsFillTypeAISupported(self.fillTypeIndex) then
+        return false, "transportCompany_hireNotAiFillType"
+    end
+
+    if source.getFillLevel ~= nil
+       and (source:getFillLevel(self.fillTypeIndex, farmId) or 0) <= 0 then
+        return false, "transportCompany_hireStationEmpty"
+    end
+
+    return true, nil
 end
 
 -- ── Lifecycle transitions ──────────────────────────────────
@@ -404,6 +449,13 @@ end
 -- for it, so the job is actually haulable when it appears.
 TransportCompanyContract.MIN_SOURCE_LITERS = 1000
 
+-- Reported for a fill type a station dispenses with no storage behind
+-- it. These are declared straight in the station XML
+-- (LoadingStation.lua:47-61) and never run out -- a shop selling seed,
+-- fertilizer or lime. Treating them as empty made every map look
+-- barren: 26 stations and 108 routes all reading zero.
+TransportCompanyContract.UNLIMITED_STOCK = 1000000
+
 ---How much of a fill type a station physically holds.
 ---
 ---LoadingStation:getFillLevel gates every source storage on
@@ -415,21 +467,70 @@ TransportCompanyContract.MIN_SOURCE_LITERS = 1000
 ---problem and validate() reports it properly at hire time.
 ---@return number liters
 function TransportCompanyContract.getStationStock(station, fillTypeIndex, farmId)
+    -- Infinite-supply goods first: no storage will ever back these.
+    if station.basicFillTypes ~= nil and station.basicFillTypes[fillTypeIndex] then
+        return TransportCompanyContract.UNLIMITED_STOCK
+    end
+
+    local total = 0
     if station.sourceStorages ~= nil then
-        local total = 0
         for _, storage in pairs(station.sourceStorages) do
             if storage.getFillLevel ~= nil then
                 total = total + (storage:getFillLevel(fillTypeIndex) or 0)
             end
         end
-        return total
     end
-    -- Stations without source storages (a shop that conjures goods)
-    -- fall back to the access-aware query.
-    if station.getFillLevel ~= nil and farmId ~= nil and farmId > 0 then
-        return station:getFillLevel(fillTypeIndex, farmId) or 0
+
+    -- sourceStorages can exist but be empty -- plenty of stations model
+    -- no storage at all. Returning 0 there reported every station on the
+    -- map as unstocked, so fall through to the access-aware query rather
+    -- than trusting an empty list.
+    if total <= 0 and station.getFillLevel ~= nil and farmId ~= nil and farmId > 0 then
+        total = station:getFillLevel(fillTypeIndex, farmId) or 0
     end
-    return 0
+    return total
+end
+
+---Count what the map can actually offer, for diagnostics.
+---@return number aiHaulable, number stocked, number routes, number stations, number withoutPlaceable
+function TransportCompanyContract.countRoutes(farmId)
+    local storageSystem = g_currentMission ~= nil and g_currentMission.storageSystem
+    if storageSystem == nil then
+        return 0, 0
+    end
+
+    local ai, stocked, any, stations, orphan = 0, 0, 0, 0, 0
+    for station, _ in pairs(storageSystem.loadingStations) do
+        if station ~= nil then
+            stations = stations + 1
+            if station.owningPlaceable == nil then
+                orphan = orphan + 1
+            else
+                local fillTypes = station:getSupportedFillTypes()
+                if fillTypes ~= nil then
+                    for fillTypeIndex, _ in pairs(fillTypes) do
+                        if fillTypeIndex ~= FillType.UNKNOWN then
+                            any = any + 1
+                            local stock = TransportCompanyContract.getStationStock(
+                                station, fillTypeIndex, farmId)
+                            if stock >= TransportCompanyContract.MIN_SOURCE_LITERS then
+                                stocked = stocked + 1
+                            end
+                            local aiOk =
+                                (station.getIsFillTypeAISupported == nil
+                                 or station:getIsFillTypeAISupported(fillTypeIndex))
+                                and farmId ~= nil and farmId > 0
+                                and (station:getFillLevel(fillTypeIndex, farmId) or 0) > 0
+                            if aiOk then
+                                ai = ai + 1
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return ai, stocked, any, stations, orphan
 end
 
 ---@param deadlineDays number|nil Deadline in game days (default 3)
@@ -453,7 +554,18 @@ function TransportCompanyContract.generate(deadlineDays, farmId)
     -- hired driver was refused outright with "Loading station is empty!"
     -- from AIParameterLoadingStation:validate. Only stations holding
     -- real stock are considered.
-    local loadingStations = {}
+    -- Three pools, in descending order of how good the job will be:
+    --   aiStations      a hired driver could run it right now
+    --   stockedStations the goods are physically there to load
+    --   anyStations     the station handles this type at all
+    --
+    -- Requiring stock outright produced an empty board on a normal map:
+    -- most loading points report no fill level, so nothing qualified.
+    -- Stock also fluctuates, and a silo the player fills later makes the
+    -- job perfectly runnable. Preference, not a requirement.
+    -- anyStations is kept for the diagnostic count only; it is never
+    -- drawn from, for the reason given at the pool selection below.
+    local aiStations, stockedStations, anyStations = {}, {}, {}
     for station, _ in pairs(storageSystem.loadingStations) do
         if station ~= nil and station.owningPlaceable ~= nil then
             local fillTypes = station:getSupportedFillTypes()
@@ -462,13 +574,27 @@ function TransportCompanyContract.generate(deadlineDays, farmId)
                     if fillTypeIndex ~= FillType.UNKNOWN then
                         local available = TransportCompanyContract.getStationStock(
                             station, fillTypeIndex, farmId)
+                        local entry = {
+                            ["station"] = station,
+                            ["fillTypeIndex"] = fillTypeIndex,
+                            ["name"] = station:getName(),
+                            ["available"] = available,
+                        }
+                        table.insert(anyStations, entry)
+
                         if available >= TransportCompanyContract.MIN_SOURCE_LITERS then
-                            table.insert(loadingStations, {
-                                ["station"] = station,
-                                ["fillTypeIndex"] = fillTypeIndex,
-                                ["name"] = station:getName(),
-                                ["available"] = available,
-                            })
+                            table.insert(stockedStations, entry)
+                        end
+
+                        -- Exactly the pair AIParameterLoadingStation:validate
+                        -- applies, so a job from this pool can be driven.
+                        local aiOk =
+                            (station.getIsFillTypeAISupported == nil
+                             or station:getIsFillTypeAISupported(fillTypeIndex))
+                            and farmId ~= nil and farmId > 0
+                            and (station:getFillLevel(fillTypeIndex, farmId) or 0) > 0
+                        if aiOk then
+                            table.insert(aiStations, entry)
                         end
                     end
                 end
@@ -476,12 +602,21 @@ function TransportCompanyContract.generate(deadlineDays, farmId)
         end
     end
 
-    if #loadingStations == 0 then
+    -- No fallback to "any station that handles the type". A source with
+    -- nothing in it produces a job neither the player nor a driver can
+    -- load, and a board of those is worse than a shorter board. With
+    -- basicFillTypes counted, genuinely stocked routes exist on any
+    -- normal map anyway.
+    local pool = stockedStations
+    if #aiStations > 0 then
+        pool = aiStations
+    end
+    if #pool == 0 then
         return nil
     end
 
     -- Pick a random source + fill type.
-    local source = loadingStations[math.random(1, #loadingStations)]
+    local source = pool[math.random(1, #pool)]
     local contract = TransportCompanyContract.new()
     contract.fillTypeIndex = source.fillTypeIndex
     contract.sourceName = source.name or ""
@@ -537,14 +672,20 @@ function TransportCompanyContract.generate(deadlineDays, farmId)
         pricePerLiter = 0.05
     end
 
-    -- Never ask for more than the source can actually supply.
+    -- Cap the ask at what the source holds, but only when it reports a
+    -- stock level at all. A station that models no storage reports 0,
+    -- and capping to that would ask for nothing.
     local available = source.available or 0
+    local knowsStock = available > 0
 
     if contract.contractType == TransportCompanyContract.CONTRACT_TYPE_PALLET then
         -- Pallet contract: counted in pallets, delivered in liters.
         -- REWARD_PER_OBJECT mirrors TransportMission.
-        local maxPallets = math.floor(available / TransportCompanyContract.LITERS_PER_PALLET)
-        local amount = math.min(math.random(4, 12), maxPallets)
+        local amount = math.random(4, 12)
+        if knowsStock then
+            amount = math.min(amount,
+                math.floor(available / TransportCompanyContract.LITERS_PER_PALLET))
+        end
         if amount < 1 then
             return nil
         end
@@ -552,7 +693,10 @@ function TransportCompanyContract.generate(deadlineDays, farmId)
         contract.litersPerUnit = TransportCompanyContract.LITERS_PER_PALLET
         contract.reward = amount * TransportCompanyContract.REWARD_PER_OBJECT
     else
-        local amount = math.min(math.random(8000, 24000), math.floor(available))
+        local amount = math.random(8000, 24000)
+        if knowsStock then
+            amount = math.min(amount, math.floor(available))
+        end
         if amount < TransportCompanyContract.MIN_SOURCE_LITERS then
             return nil
         end

@@ -29,7 +29,7 @@
         <e k="transportCompany_statusExpired" v="Expired"/>
         <e k="transportCompany_statusFailed" v="Failed"/>
         <e k="transportCompany_noHq" v="No Transport Company yet. Buy the Transport Company HQ from the shop (Buildings &gt; Sheds) and place it on your farm to open the dispatch office."/>
-        <e k="transportCompany_noContracts" v="No contracts available right now. New jobs arrive as the days go by."/>
+        <e k="transportCompany_noContracts" v="No freight available. Contracts appear when a station holds goods to collect, so fill a silo you own or wait for a production to build up stock."/>
         <e k="transportCompany_noActiveContracts" v="No active contracts. Accept a job from the dispatch board."/>
         <e k="transportCompany_acceptContract" v="Accept contract"/>
         <e k="transportCompany_hireDriver" v="Hire driver"/>
@@ -108,5 +108,12 @@
         <e k="transportCompany_settingDesc_showNotifications" v="Show a message when a contract is accepted, delivered or expires."/>
         <e k="transportCompany_setting_debugMode" v="Debug logging"/>
         <e k="transportCompany_settingDesc_debugMode" v="Verbose output in log.txt. Saved per player, off by default."/>
+        <e k="transportCompany_hireStationEmpty" v="The pickup station has none of these goods available to your farm, so a hired driver has nothing to load. Haul it yourself, or wait for the station to restock."/>
+        <e k="transportCompany_hireNotAiFillType" v="Hired drivers cannot load these goods at this station. You can still haul it yourself."/>
+        <e k="transportCompany_hireNoStation" v="This contract's pickup or drop-off station no longer exists."/>
+        <e k="transportCompany_hireNoFarm" v="No farm owns this contract."/>
+        <e k="transportCompany_hireAvailable" v="Available"/>
+        <e k="transportCompany_hireUnavailable" v="Not possible"/>
+        <e k="transportCompany_hireReason" v="Reason"/>
     </elements>
 </l10n>

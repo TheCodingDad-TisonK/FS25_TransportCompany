@@ -254,14 +254,36 @@ function InGameMenuTransportCompanyFrame:_updateMenuButtons()
         end
     else
         local contract = self:getSelectedContract()
-        if contract ~= nil and contract.state == TransportCompanyContract.STATE_AVAILABLE then
-            table.insert(buttons, self.acceptButtonInfo)
-            table.insert(buttons, self.hireButtonInfo)
+        if contract ~= nil then
+            -- Only offer Hire when the engine would actually accept the
+            -- job. A button that refuses every time reads as broken, and
+            -- on maps with no AI-loadable source it would refuse always.
+            local canHire = self:_getCanHire(contract)
+
+            if contract.state == TransportCompanyContract.STATE_AVAILABLE then
+                table.insert(buttons, self.acceptButtonInfo)
+                if canHire then
+                    table.insert(buttons, self.hireButtonInfo)
+                end
+            elseif contract.state == TransportCompanyContract.STATE_ACCEPTED
+                   and not contract.isHiredDriver and canHire then
+                -- A job you took can still be handed to a driver.
+                table.insert(buttons, self.hireButtonInfo)
+            end
         end
     end
 
     self:setMenuButtonInfo(buttons)
     self:setMenuButtonInfoDirty()
+end
+
+---Could a hired driver run this contract right now?
+---@return boolean canHire, string|nil reasonKey
+function InGameMenuTransportCompanyFrame:_getCanHire(contract)
+    if contract == nil or contract.getIsAiHaulable == nil then
+        return false, nil
+    end
+    return contract:getIsAiHaulable(g_currentMission:getFarmId())
 end
 
 ---Selection changed in a list.
@@ -502,6 +524,18 @@ function InGameMenuTransportCompanyFrame:_buildContractDetail(contract)
             contract.isHiredDriver
                 and g_i18n:getText("transportCompany_hireDriver")
                 or g_i18n:getText("transportCompany_fleetTruckName"))
+    end
+
+    -- Whether a driver could take this, stated up front rather than
+    -- discovered by pressing a button that refuses.
+    if not contract.isHiredDriver then
+        local canHire, reasonKey = self:_getCanHire(contract)
+        self:_addDetail("transportCompany_hireDriver",
+            canHire and g_i18n:getText("transportCompany_hireAvailable")
+                    or g_i18n:getText("transportCompany_hireUnavailable"))
+        if not canHire and reasonKey ~= nil then
+            self:_addDetail("transportCompany_hireReason", g_i18n:getText(reasonKey))
+        end
     end
 
     self:_setProgress(contract:getProgressRatio(), string.format(

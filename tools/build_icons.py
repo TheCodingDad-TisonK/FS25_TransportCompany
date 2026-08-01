@@ -202,10 +202,10 @@ def on_bg(art, size, pad):
 
 
 MOD = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-on_bg(render_depot(), 256, 18).save(MOD + "/textures/store_transportCompanyHq.png")
-squarePad(render_tab()).resize((128, 128), Image.LANCZOS).save(
-    MOD + "/textures/tab_transportCompany.png")
-print("wrote icon_source.png, store_transportCompanyHq.png, tab_transportCompany.png")
+# storeIcon must be 512x512 (TestRunner storeIconResolution)
+STORE = on_bg(render_depot(), 512, 36)
+TAB = squarePad(render_tab()).resize((128, 128), Image.LANCZOS)
+
 
 # --- mod icon: artwork -> FS25 backdrop -> DXT1 dds -------------------
 # modDesc ships textures/icon.dds. FS25 warns "raw format" and does CPU
@@ -213,10 +213,23 @@ print("wrote icon_source.png, store_transportCompanyHq.png, tab_transportCompany
 # 512x512 DXT1, so the PNG is only an intermediate.
 import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from dds import save_dxt1
+from dds import save_auto
 
 art = render_truck(True)
 art.save(MOD + "/icon_source.png")
-icon = on_bg(art, 512, 40)
-save_dxt1(icon, MOD + "/textures/icon.dds")
-print("wrote textures/icon.dds (512x512 DXT1)")
+
+# Every referenced texture ships as DDS. The GIANTS TestRunner looks up
+# parsed DDS data for each texture a mod references and crashes on a PNG
+# ("'NoneType' object has no attribute 'header_dx10'"), so a single PNG
+# left behind is a hard ModHub blocker.
+from dds import save_bc7
+
+# The mod icon must be named icon_<modName>.dds (TestRunner "mod icon
+# name"), and a storeIcon must be BC7_UNORM at 512x512, not DXT1.
+for image, name in ((on_bg(art, 512, 40), "icon_FS25_TransportCompany"),
+                    (TAB, "tab_transportCompany")):
+    size, fmt = save_auto(image, "%s/textures/%s.dds" % (MOD, name))
+    print("wrote textures/%s.dds (%s, %d KB)" % (name, fmt, size // 1024))
+
+size = save_bc7(STORE, MOD + "/textures/store_transportCompanyHq.dds")
+print("wrote textures/store_transportCompanyHq.dds (BC7_UNORM, %d KB)" % (size // 1024))

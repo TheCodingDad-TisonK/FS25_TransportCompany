@@ -80,6 +80,48 @@ ok(e:expire() == true and e:expire() == false, "expire idempotent")
 local f = C.new(); f:complete()
 ok(f:expire() == false, "completed contract cannot expire")
 
+print("")
+print("-- station stock is physical, not access-gated --")
+-- LoadingStation:getFillLevel filters every storage through
+-- hasFarmAccessToStorage, so a map elevator reports 0 to the player and
+-- everything reports 0 for farmId 0. Gating generation on it emptied
+-- the board completely.
+local storage = { getFillLevel = function(_, ft) return ft == FillType.WHEAT and 5000 or 0 end }
+local mapStation = { sourceStorages = { storage }, getFillLevel = function() return 0 end }
+ok(C.getStationStock(mapStation, FillType.WHEAT, 0) == 5000, "stock seen with farmId 0")
+ok(C.getStationStock(mapStation, FillType.WHEAT, 1) == 5000, "stock seen regardless of access")
+ok(C.getStationStock(mapStation, FillType.DIESEL, 1) == 0, "absent fill type reports zero")
+
+local shop = { getFillLevel = function() return 777 end }
+ok(C.getStationStock(shop, FillType.WHEAT, 1) == 777, "no sourceStorages falls back")
+ok(C.getStationStock(shop, FillType.WHEAT, 0) == 0, "fallback needs a real farm")
+
+-- The regression that emptied the board a second time: sourceStorages
+-- PRESENT but EMPTY is not the same as no stock. Plenty of stations
+-- model no storage; returning 0 there marked the whole map unstocked.
+local emptyList = { sourceStorages = {}, getFillLevel = function() return 4200 end }
+ok(C.getStationStock(emptyList, FillType.WHEAT, 1) == 4200,
+   "empty sourceStorages falls through to the station query",
+   C.getStationStock(emptyList, FillType.WHEAT, 1))
+local reallyEmpty = { sourceStorages = {}, getFillLevel = function() return 0 end }
+ok(C.getStationStock(reallyEmpty, FillType.WHEAT, 1) == 0,
+   "genuinely empty station still reports zero")
+
+-- A station can dispense goods with no storage behind it at all:
+-- basicFillTypes is declared in the station XML and never runs out.
+-- Reading those as empty made a whole map look barren -- 26 stations,
+-- 108 routes, every one reporting zero.
+local shopStation = {
+  basicFillTypes = { [FillType.WHEAT] = true },
+  sourceStorages = {},
+  getFillLevel = function() return 0 end,
+}
+ok(C.getStationStock(shopStation, FillType.WHEAT, 1) == C.UNLIMITED_STOCK,
+   "basicFillTypes reports unlimited supply",
+   C.getStationStock(shopStation, FillType.WHEAT, 1))
+ok(C.getStationStock(shopStation, FillType.DIESEL, 1) == 0,
+   "a type the shop does not stock is still zero")
+
 print("\n-- truck books --")
 local veh = { getUniqueId=function() return "vehicleXYZ" end,
               getFullName=function() return "Scania" end,

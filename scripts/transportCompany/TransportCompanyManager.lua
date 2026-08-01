@@ -58,6 +58,7 @@ function TransportCompanyManager.new(modDirectory, modName)
 
     -- Runtime state
     self.isMissionLoaded = false
+    self.isMissionStarted = false
     self.isServer = false
     self.tickTimer = 0
     self.deadlineCheckTimer = 0
@@ -203,7 +204,9 @@ function TransportCompanyManager:_onMissionStarted()
         return
     end
 
-    -- The world exists by now, so stations and placeables resolve.
+    -- The world exists by now, so stations, placeables and the fill
+    -- levels inside their storages all resolve.
+    self.isMissionStarted = true
     self:_loadContracts()
     self:_scanForHqs()
 
@@ -248,6 +251,7 @@ function TransportCompanyManager:_onDeleteMission()
     self.contracts = {}
     self.hqPlaceables = {}
     self.trucks = {}
+    self.isMissionStarted = false
     self.ledger = { revenue = 0, driverWages = 0, jobs = 0 }
     self.isMissionLoaded = false
 end
@@ -361,7 +365,7 @@ function TransportCompanyManager:_registerPdaPage()
         -- A table is treated as pixel values and divided by the 1024
         -- reference size (GuiUtils.lua:31), so {0,0,1,1} would select a
         -- single pixel; "0 0 1 1" is passed through untouched.
-        local iconFile = Utils.getFilename("textures/tab_transportCompany.png", self.modDirectory)
+        local iconFile = Utils.getFilename("textures/tab_transportCompany.dds", self.modDirectory)
         if type(inGameMenu.addPageTab) == "function" and GuiUtils ~= nil then
             pcall(inGameMenu.addPageTab, inGameMenu, screen, iconFile, GuiUtils.getUVs("0 0 1 1"))
         end
@@ -454,6 +458,15 @@ end
 ---presence. Called on HQ change and on a timer.
 function TransportCompanyManager:_regenerateContractBoard()
     if not self.isServer then return end
+
+    -- Nothing before the mission actually starts. Placeables exist during
+    -- loading but their storages have not read their fill levels from the
+    -- savegame yet, so every station reports empty and the board fills
+    -- with jobs whose sources look bare. _onMissionStarted regenerates.
+    if not self.isMissionStarted then
+        TransportCompanyLog.debug("board: mission not started, deferring generation")
+        return
+    end
     if not self:_hasHq() then
         TransportCompanyLog.debug("board: no HQ, nothing generated")
         return
@@ -483,12 +496,22 @@ function TransportCompanyManager:_regenerateContractBoard()
         )
     end
 
-    if activeCount < maxActive then
-        -- Generation gave up early: usually no source station holds
-        -- enough of anything, or no destination accepts it.
+    -- Always report, not just on a shortfall. A full board built entirely
+    -- from non-AI routes looks healthy but leaves "Hire driver" refusing
+    -- every time, and that is invisible without these numbers.
+    local ai, stocked, routes, stations, orphan =
+        TransportCompanyContract.countRoutes(boardFarmId)
+    TransportCompanyLog.info(
+        "board: %d/%d contracts (farm %s; %d loading stations, %d without a "
+        .. "placeable, %d routes, %d stocked, %d AI-haulable)",
+        activeCount, maxActive, tostring(boardFarmId),
+        stations, orphan, routes, stocked, ai
+    )
+    if ai == 0 and routes > 0 then
         TransportCompanyLog.info(
-            "board: %d/%d contracts (generation found no further route; farm %s)",
-            activeCount, maxActive, tostring(boardFarmId)
+            "board: no AI-haulable route on this map for farm %s -- hired "
+            .. "drivers will be refused; these jobs must be hauled in person",
+            tostring(boardFarmId)
         )
     end
 end
@@ -552,7 +575,7 @@ function TransportCompanyManager:_loadContracts()
     local xmlFile = XMLFile.load("transportCompanyContracts", filePath)
     if xmlFile == nil then return end
 
-    local loaded, dropped = 0, 0
+    local loaded, dropped, stale = 0, 0, 0
     local idx = 0
     while true do
         local key = string.format("transportCompany.contracts.contract(%d)", idx)
@@ -562,9 +585,15 @@ function TransportCompanyManager:_loadContracts()
         local contract = TransportCompanyContract.new()
         contract:loadFromXMLFile(xmlFile, key)
 
-        -- A station demolished since the last save leaves the contract
-        -- unplayable; drop it rather than keeping a dead board entry.
-        if contract:_resolveStationRefs() then
+        -- Drop anything an older generator wrote: those contracts can
+        -- reference sources that cannot supply them, and no amount of
+        -- retrying fixes that. A station demolished since the last save
+        -- is dropped for the same reason.
+        local isStale = (contract.generatorVersion or 0)
+            < TransportCompanyContract.GENERATOR_VERSION
+        if isStale then
+            stale = stale + 1
+        elseif contract:_resolveStationRefs() then
             self.contracts[contract.contractId] = contract
             loaded = loaded + 1
         else
@@ -591,8 +620,8 @@ function TransportCompanyManager:_loadContracts()
     xmlFile:delete()
 
     TransportCompanyLog.info(
-        "Loaded %d contracts (%d dropped), %d trucks from savegame",
-        loaded, dropped, truckIdx
+        "Loaded %d contracts (%d dropped, %d stale), %d trucks from savegame",
+        loaded, dropped, stale, truckIdx
     )
 end
 
@@ -792,10 +821,27 @@ function TransportCompanyManager:onAcceptRequest(contractId, mode, farmId)
     if not self.isServer then return false end
 
     local contract = self.contracts[contractId]
-    if contract == nil or contract.state ~= TransportCompanyContract.STATE_AVAILABLE then
+    if contract == nil then
         return false
     end
     if farmId == nil or farmId <= 0 then
+        return false
+    end
+
+    local isHire = mode == TransportCompanyAcceptEvent.MODE_HIRE
+
+    -- Hiring a driver for a job you already took is a normal thing to
+    -- want: take it, look at the route, decide to hand it over. That
+    -- used to be impossible because both buttons disappeared the moment
+    -- a contract left AVAILABLE.
+    if contract.state == TransportCompanyContract.STATE_ACCEPTED then
+        if isHire and not contract.isHiredDriver and contract.farmId == farmId then
+            return self:_hireForAcceptedContract(contract, farmId)
+        end
+        return false
+    end
+
+    if contract.state ~= TransportCompanyContract.STATE_AVAILABLE then
         return false
     end
 
@@ -804,8 +850,19 @@ function TransportCompanyManager:onAcceptRequest(contractId, mode, farmId)
     contract.deadline = g_currentMission.time
         + TransportCompanyContract.DAY_LENGTH * deadlineDays
 
-    local isHire = mode == TransportCompanyAcceptEvent.MODE_HIRE
     local truck = isHire and self:_findTruckForContract(contract, farmId) or nil
+
+    if isHire then
+        -- Check the job before touching contract state, so a refusal
+        -- leaves the board exactly as it was.
+        local haulable, reasonKey = contract:getIsAiHaulable(farmId)
+        if not haulable then
+            TransportCompanyLog.info(
+                "Hire refused for %s: %s", tostring(contractId), tostring(reasonKey))
+            self:_notify(g_i18n:getText(reasonKey))
+            return false
+        end
+    end
 
     if isHire and truck == nil then
         TransportCompanyLog.info(
@@ -842,6 +899,46 @@ function TransportCompanyManager:onAcceptRequest(contractId, mode, farmId)
         g_i18n:getText("transportCompany_contractAccepted"),
         contract:getLocalizedFillType(), contract.destName,
         g_i18n:formatMoney(contract.reward, 0, true, true)
+    ))
+    return true
+end
+
+---Put a driver on a contract this farm already accepted.
+---@return boolean started
+function TransportCompanyManager:_hireForAcceptedContract(contract, farmId)
+    local haulable, reasonKey = contract:getIsAiHaulable(farmId)
+    if not haulable then
+        TransportCompanyLog.info(
+            "Hire refused for %s: %s", tostring(contract.contractId), tostring(reasonKey))
+        self:_notify(g_i18n:getText(reasonKey))
+        return false
+    end
+
+    local truck = self:_findTruckForContract(contract, farmId)
+    if truck == nil then
+        self:_notify(g_i18n:getText("transportCompany_noTruck"))
+        return false
+    end
+
+    local previousTruck = contract.acceptedTruckUniqueId
+    contract.isHiredDriver = true
+    contract.acceptedTruckUniqueId = truck.uniqueId
+
+    local started, reason = self:_dispatchHiredDriver(contract, truck)
+    if not started then
+        -- Leave the contract accepted and player-hauled, as it was.
+        contract.isHiredDriver = false
+        contract.acceptedTruckUniqueId = previousTruck
+        self:_notify(reason or g_i18n:getText("transportCompany_noTruck"))
+        return false
+    end
+
+    TransportCompanyContractEvent.sendEvent(
+        TransportCompanyContractEvent.TYPE_UPDATE, contract
+    )
+    self:_notify(string.format(
+        g_i18n:getText("transportCompany_driverDispatched"),
+        truck.vehicleName or "", contract:getLocalizedFillType()
     ))
     return true
 end
@@ -1299,6 +1396,20 @@ function TransportCompanyManager:_registerConsoleCommands()
     )
 
     addConsoleCommand(
+        "tc_stations",
+        "List every loading station, its stock and whether the AI can load there",
+        "consoleCommandStations",
+        self
+    )
+
+    addConsoleCommand(
+        "tc_reset_board",
+        "Clear every contract and regenerate the dispatch board",
+        "consoleCommandResetBoard",
+        self
+    )
+
+    addConsoleCommand(
         "tc_reset_settings",
         "Reset Transport Company settings to defaults",
         "consoleCommandResetSettings",
@@ -1366,6 +1477,117 @@ function TransportCompanyManager:consoleCommandListTrucks()
         ))
     end
     print(string.format("TransportCompany: %d trucks enrolled", count))
+end
+
+---Dump every loading station the map offers, with the two facts that
+---decide whether a hired driver can ever run a job from it.
+---
+---A route is AI-haulable only when the station has a load trigger
+---flagged for AI loading (LoadingStation.lua:145-149) AND the farm can
+---draw stock from it (getFillLevel is access gated). Neither can be
+---manufactured by this mod, so when "Hire driver" is never available
+---this says which of the two is missing.
+function TransportCompanyManager:consoleCommandStations()
+    local storageSystem = g_currentMission ~= nil and g_currentMission.storageSystem
+    if storageSystem == nil then
+        print("TransportCompany: no storage system")
+        return
+    end
+
+    local farmId = self:_getCompanyFarmId()
+    if farmId <= 0 then
+        farmId = g_currentMission:getFarmId()
+    end
+    print(string.format("TransportCompany: loading stations (farm %s)", tostring(farmId)))
+
+    local stations, routes, aiTriggered, haulable = 0, 0, 0, 0
+    for station, _ in pairs(storageSystem.loadingStations) do
+        if station ~= nil then
+            stations = stations + 1
+            local fillTypes = station:getSupportedFillTypes() or {}
+            local owner = station.owningPlaceable ~= nil
+                and station.owningPlaceable:getOwnerFarmId() or "-"
+            local anyAiTrigger = false
+            local lines = {}
+
+            for fillTypeIndex, _ in pairs(fillTypes) do
+                if fillTypeIndex ~= FillType.UNKNOWN then
+                    routes = routes + 1
+                    local aiType = station.getIsFillTypeAISupported ~= nil
+                        and station:getIsFillTypeAISupported(fillTypeIndex) or false
+                    local physical = TransportCompanyContract.getStationStock(
+                        station, fillTypeIndex, farmId)
+                    local reachable = station.getFillLevel ~= nil
+                        and (station:getFillLevel(fillTypeIndex, farmId) or 0) or 0
+                    if aiType then
+                        anyAiTrigger = true
+                    end
+                    if aiType and reachable > 0 then
+                        haulable = haulable + 1
+                    end
+                    local basic = station.basicFillTypes ~= nil
+                        and station.basicFillTypes[fillTypeIndex] or false
+                    table.insert(lines, string.format(
+                        "      %-22s physical=%-10s reachable=%-10d aiLoadable=%s",
+                        g_fillTypeManager:getFillTypeNameByIndex(fillTypeIndex) or "?",
+                        basic and "unlimited" or tostring(physical),
+                        reachable, tostring(aiType)))
+                end
+            end
+
+            if #lines > 0 then
+                if anyAiTrigger then
+                    aiTriggered = aiTriggered + 1
+                end
+                print(string.format("  %-34s owner=%s placeable=%s",
+                    station:getName() or "?", tostring(owner),
+                    tostring(station.owningPlaceable ~= nil)))
+                for _, line in ipairs(lines) do
+                    print(line)
+                end
+            end
+        end
+    end
+
+    print(string.format(
+        "TransportCompany: %d stations, %d routes, %d stations with an AI load "
+        .. "trigger, %d routes a driver could run now",
+        stations, routes, aiTriggered, haulable))
+    if haulable == 0 then
+        if aiTriggered == 0 then
+            print("TransportCompany: no station on this map has an AI-capable load "
+                .. "trigger, so hired drivers cannot load anywhere. Haul in person.")
+        else
+            print("TransportCompany: stations support AI loading but hold nothing "
+                .. "your farm can draw. Fill a silo you own and routes will appear.")
+        end
+    end
+end
+
+---Throw the whole board away and build a fresh one. Useful after a
+---generation change, when a save still holds contracts the current
+---rules would never have produced.
+function TransportCompanyManager:consoleCommandResetBoard()
+    if not self.isServer then
+        print("TransportCompany: only the server can reset the board")
+        return
+    end
+
+    local removed = 0
+    for id, contract in pairs(self.contracts) do
+        if contract.state ~= TransportCompanyContract.STATE_COMPLETED then
+            self.contracts[id] = nil
+            removed = removed + 1
+        end
+    end
+
+    self:_regenerateContractBoard()
+
+    local now = 0
+    for _ in pairs(self.contracts) do now = now + 1 end
+    print(string.format(
+        "TransportCompany: cleared %d contract(s), board now holds %d",
+        removed, now))
 end
 
 function TransportCompanyManager:consoleCommandResetSettings()

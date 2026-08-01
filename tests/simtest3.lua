@@ -81,5 +81,65 @@ mgr:onGoodsDelivered(DEST, 1, 1000, FillType.WHEAT)
 ok(c1.state==C.STATE_COMPLETED, "self-accepted contract completes on delivery")
 ok(mgr.ledger.jobs==1, "ledger counted the job", mgr.ledger.jobs)
 
+print("")
+print("-- hiring a driver for a job already accepted --")
+-- Accepting used to hide both buttons, so a job you took could never be
+-- handed over. It also has to survive the AI's own checks, which are
+-- stricter than contract generation: AI-supported fill type, and stock
+-- the FARM can draw (AIParameterLoadingStation:validate).
+local STATION_OK = {
+    name = "ok",
+    getIsFillTypeAISupported = function() return true end,
+    getFillLevel = function(_, ft, farm) return farm == 1 and 9000 or 0 end,
+}
+local STATION_EMPTY = {
+    name = "empty",
+    getIsFillTypeAISupported = function() return true end,
+    getFillLevel = function() return 0 end,
+}
+local STATION_NOAI = {
+    name = "noai",
+    getIsFillTypeAISupported = function() return false end,
+    getFillLevel = function() return 9000 end,
+}
+
+local function jobWith(id, src)
+    local c = C.new()
+    c.contractId, c.amount, c.litersPerUnit, c.reward = id, 1000, 1, 500
+    c.fillTypeIndex = FillType.WHEAT
+    c.getSourceStation = function() return src end
+    c.getDestStation = function() return DEST end
+    mgr.contracts[id] = c
+    return c
+end
+
+local h1 = jobWith("h1", STATION_OK)
+ok(select(1, h1:getIsAiHaulable(1)) == true, "haulable when stocked and AI-supported")
+ok(select(1, h1:getIsAiHaulable(0)) == false, "not haulable without a farm")
+local h2 = jobWith("h2", STATION_EMPTY)
+local haul, why = h2:getIsAiHaulable(1)
+ok(haul == false and why == "transportCompany_hireStationEmpty",
+   "empty station reported precisely", why)
+local h3 = jobWith("h3", STATION_NOAI)
+haul, why = h3:getIsAiHaulable(1)
+ok(haul == false and why == "transportCompany_hireNotAiFillType",
+   "non-AI fill type reported precisely", why)
+
+-- accept for self, then hand it to a driver
+g_currentMission.aiJobTypeManager = { createJob = function() return {
+    getIsAvailableForVehicle = function() return false end } end }
+AIJobType = { LOAD_AND_DELIVER = 5 }
+ok(mgr:onAcceptRequest("h1", TransportCompanyAcceptEvent.MODE_SELF, 1),
+   "accept for self succeeds")
+ok(h1.state == C.STATE_ACCEPTED and h1.isHiredDriver == false, "self-hauled")
+-- no usable truck, so the hire is refused -- but it must be REACHED,
+-- not rejected up front for being already accepted
+ok(mgr:onAcceptRequest("h1", TransportCompanyAcceptEvent.MODE_HIRE, 1) == false,
+   "hire on an accepted job is attempted and refused cleanly")
+ok(h1.state == C.STATE_ACCEPTED, "still accepted after a failed hire")
+ok(h1.isHiredDriver == false, "no phantom driver left behind")
+ok(mgr:onAcceptRequest("h1", TransportCompanyAcceptEvent.MODE_HIRE, 2) == false,
+   "another farm cannot hire for it")
+
 print(string.format("\n%d passed, %d failed", pass, fail))
 return fail

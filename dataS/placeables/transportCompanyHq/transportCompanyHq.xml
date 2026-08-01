@@ -5,7 +5,7 @@
         <functions>
             <function>$l10n_function_transportCompanyHq</function>
         </functions>
-        <image>textures/store_transportCompanyHq.png</image>
+        <image>textures/store_transportCompanyHq.dds</image>
         <price>25000</price>
         <dailyUpkeep>25</dailyUpkeep>
         <lifetime>1000</lifetime>
@@ -22,6 +22,9 @@
 
     <base>
         <filename>$data/placeables/easySheds/easyShed01/easyShed01.i3d</filename>
+        <!-- Both live under placeable.base, not storeData (Placeable.lua:108-109) -->
+        <canBeRenamed>true</canBeRenamed>
+        <boughtWithFarmland>false</boughtWithFarmland>
     </base>
 
     <placement useRandomYRotation="false" useManualYRotation="true">
