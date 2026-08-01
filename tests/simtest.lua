@@ -107,6 +107,21 @@ local reallyEmpty = { sourceStorages = {}, getFillLevel = function() return 0 en
 ok(C.getStationStock(reallyEmpty, FillType.WHEAT, 1) == 0,
    "genuinely empty station still reports zero")
 
+-- A station can dispense goods with no storage behind it at all:
+-- basicFillTypes is declared in the station XML and never runs out.
+-- Reading those as empty made a whole map look barren -- 26 stations,
+-- 108 routes, every one reporting zero.
+local shopStation = {
+  basicFillTypes = { [FillType.WHEAT] = true },
+  sourceStorages = {},
+  getFillLevel = function() return 0 end,
+}
+ok(C.getStationStock(shopStation, FillType.WHEAT, 1) == C.UNLIMITED_STOCK,
+   "basicFillTypes reports unlimited supply",
+   C.getStationStock(shopStation, FillType.WHEAT, 1))
+ok(C.getStationStock(shopStation, FillType.DIESEL, 1) == 0,
+   "a type the shop does not stock is still zero")
+
 print("\n-- truck books --")
 local veh = { getUniqueId=function() return "vehicleXYZ" end,
               getFullName=function() return "Scania" end,

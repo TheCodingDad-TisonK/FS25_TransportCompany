@@ -449,6 +449,13 @@ end
 -- for it, so the job is actually haulable when it appears.
 TransportCompanyContract.MIN_SOURCE_LITERS = 1000
 
+-- Reported for a fill type a station dispenses with no storage behind
+-- it. These are declared straight in the station XML
+-- (LoadingStation.lua:47-61) and never run out -- a shop selling seed,
+-- fertilizer or lime. Treating them as empty made every map look
+-- barren: 26 stations and 108 routes all reading zero.
+TransportCompanyContract.UNLIMITED_STOCK = 1000000
+
 ---How much of a fill type a station physically holds.
 ---
 ---LoadingStation:getFillLevel gates every source storage on
@@ -460,6 +467,11 @@ TransportCompanyContract.MIN_SOURCE_LITERS = 1000
 ---problem and validate() reports it properly at hire time.
 ---@return number liters
 function TransportCompanyContract.getStationStock(station, fillTypeIndex, farmId)
+    -- Infinite-supply goods first: no storage will ever back these.
+    if station.basicFillTypes ~= nil and station.basicFillTypes[fillTypeIndex] then
+        return TransportCompanyContract.UNLIMITED_STOCK
+    end
+
     local total = 0
     if station.sourceStorages ~= nil then
         for _, storage in pairs(station.sourceStorages) do
@@ -551,6 +563,8 @@ function TransportCompanyContract.generate(deadlineDays, farmId)
     -- most loading points report no fill level, so nothing qualified.
     -- Stock also fluctuates, and a silo the player fills later makes the
     -- job perfectly runnable. Preference, not a requirement.
+    -- anyStations is kept for the diagnostic count only; it is never
+    -- drawn from, for the reason given at the pool selection below.
     local aiStations, stockedStations, anyStations = {}, {}, {}
     for station, _ in pairs(storageSystem.loadingStations) do
         if station ~= nil and station.owningPlaceable ~= nil then
@@ -588,11 +602,14 @@ function TransportCompanyContract.generate(deadlineDays, farmId)
         end
     end
 
-    local pool = anyStations
+    -- No fallback to "any station that handles the type". A source with
+    -- nothing in it produces a job neither the player nor a driver can
+    -- load, and a board of those is worse than a shorter board. With
+    -- basicFillTypes counted, genuinely stocked routes exist on any
+    -- normal map anyway.
+    local pool = stockedStations
     if #aiStations > 0 then
         pool = aiStations
-    elseif #stockedStations > 0 then
-        pool = stockedStations
     end
     if #pool == 0 then
         return nil

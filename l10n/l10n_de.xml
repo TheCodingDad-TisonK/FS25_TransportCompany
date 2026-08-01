@@ -29,7 +29,7 @@
         <e k="transportCompany_statusExpired" v="Erloschen"/>
         <e k="transportCompany_statusFailed" v="Fehlgeschlagen"/>
         <e k="transportCompany_noHq" v="Noch kein Transportunternehmen. Kaufe die Transportunternehmen-Zentrale beim Händler (Gebäude &gt; Hallen) und stelle sie auf deinem Hof auf, um die Disposition zu öffnen."/>
-        <e k="transportCompany_noContracts" v="Zurzeit keine Aufträge verfügbar. Neue Aufträge kommen im Lauf der Tage herein."/>
+        <e k="transportCompany_noContracts" v="Keine Fracht verfügbar. Aufträge erscheinen, sobald eine Station Ware zum Abholen hat. Fülle ein eigenes Silo oder warte, bis eine Produktion Bestand aufgebaut hat."/>
         <e k="transportCompany_noActiveContracts" v="Keine laufenden Aufträge. Nimm einen Auftrag von der Auftragstafel an."/>
         <e k="transportCompany_acceptContract" v="Auftrag annehmen"/>
         <e k="transportCompany_hireDriver" v="Fahrer anstellen"/>

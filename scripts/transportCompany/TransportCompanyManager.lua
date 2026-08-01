@@ -1525,10 +1525,13 @@ function TransportCompanyManager:consoleCommandStations()
                     if aiType and reachable > 0 then
                         haulable = haulable + 1
                     end
+                    local basic = station.basicFillTypes ~= nil
+                        and station.basicFillTypes[fillTypeIndex] or false
                     table.insert(lines, string.format(
-                        "      %-22s physical=%-10d reachable=%-10d aiLoadable=%s",
+                        "      %-22s physical=%-10s reachable=%-10d aiLoadable=%s",
                         g_fillTypeManager:getFillTypeNameByIndex(fillTypeIndex) or "?",
-                        physical, reachable, tostring(aiType)))
+                        basic and "unlimited" or tostring(physical),
+                        reachable, tostring(aiType)))
                 end
             end
 
