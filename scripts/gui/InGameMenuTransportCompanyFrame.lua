@@ -233,9 +233,20 @@ function InGameMenuTransportCompanyFrame:_updateMenuButtons()
     self:setMenuButtonInfoDirty()
 end
 
----Selection changed in the list — the buttons may need to appear or
----disappear. Bound from the SmoothList's #onClick.
-function InGameMenuTransportCompanyFrame:onListSelectionChanged()
+---Selection changed in a list.
+---
+---Only the left list matters here. Both lists share this frame as
+---their delegate (SmoothListElement.lua:130), and reloadData ends up
+---calling setSelectedItem, which fires this callback
+---(SmoothListElement.lua:488, :857). So reacting to the detail list
+---meant _updateDetail -> detailList:reloadData -> onListSelectionChanged
+----> _updateDetail forever, and the menu died with a stack overflow in
+---GuiElement/TextElement/I18N a second after opening.
+---@param list table The list that raised the event
+function InGameMenuTransportCompanyFrame:onListSelectionChanged(list, section, index)
+    if list ~= nil and list == self.detailList then
+        return
+    end
     self:_updateDetail()
     self:_updateMenuButtons()
 end
@@ -349,6 +360,20 @@ end
 ---notification and nothing else, with no way to see where to load,
 ---where to deliver, or how long was left.
 function InGameMenuTransportCompanyFrame:_updateDetail()
+    -- Belt and braces against the recursion described on
+    -- onListSelectionChanged: this must never re-enter itself, however
+    -- the list callbacks are wired up.
+    if self._inUpdateDetail then
+        return
+    end
+    self._inUpdateDetail = true
+
+    self:_rebuildDetail()
+
+    self._inUpdateDetail = false
+end
+
+function InGameMenuTransportCompanyFrame:_rebuildDetail()
     self.detailRows = {}
 
     local index = self.contentList ~= nil and self.contentList.selectedIndex or 0
