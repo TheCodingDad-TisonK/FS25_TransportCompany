@@ -165,6 +165,20 @@ def main():
                 warn("icon is PNG; the engine logs 'raw format' and generates "
                      "mips on the CPU. DDS is preferred.")
 
+    # description lines may not be indented more than 3 spaces
+    # (TestRunner "description has more than 3 leading spaces before")
+    dstart = md.find("<description>")
+    dend = md.find("</description>")
+    if dstart != -1 and dend != -1:
+        over = [l for l in md[dstart:dend].split("
+")
+                if l.strip() and len(l) - len(l.lstrip(" ")) > 3]
+        if over:
+            err("description has %d line(s) indented more than 3 spaces "
+                "(TestRunner text error)" % len(over))
+        else:
+            ok("description indentation within 3 spaces")
+
     # --- TestRunner naming and format rules --------------------------
     if icon and not icon.endswith("icon_%s.dds" % MOD_NAME):
         err("mod icon %s must be named icon_%s.dds "

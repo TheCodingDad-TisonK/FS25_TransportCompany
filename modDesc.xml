@@ -4,7 +4,7 @@
         <en>Transport Company</en>
     </title>
     <description>
-        <en><![CDATA[
+  <en><![CDATA[
 Own and operate a trucking company.
 
 Your map is already full of silos, dairies and mills moving goods between them.
@@ -24,8 +24,8 @@ economy price, revenue earned, wages paid and jobs completed. The ledger keeps
 company totals and a history of every finished contract.
 
 No map preparation of any kind is required.
-        ]]></en>
-        <de><![CDATA[
+  ]]></en>
+  <de><![CDATA[
 Fuehre dein eigenes Transportunternehmen.
 
 Auf deiner Karte bewegen Silos, Molkereien und Muehlen laengst Waren hin und
@@ -45,7 +45,7 @@ Jeder LKW fuehrt eigene Buecher: Fahrstrecke, verbrauchter Diesel zum aktuellen
 Preis, Einnahmen, Loehne und abgeschlossene Auftraege.
 
 Es ist keinerlei Vorbereitung der Karte noetig.
-        ]]></de>
+  ]]></de>
     </description>
 
     <version>1.0.0.0</version>
