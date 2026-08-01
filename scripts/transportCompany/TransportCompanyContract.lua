@@ -247,11 +247,19 @@ function TransportCompanyContract:getFillTypeName()
     return g_fillTypeManager:getFillTypeNameByIndex(self.fillTypeIndex) or ""
 end
 
+--- Display name of the hauled goods.
+---
+--- getFillTypeTitleByIndex already returns a localized title
+--- (FillTypeManager.lua:295 reads indexToTitle, which FillTypeDesc
+--- resolved at load). Passing it through g_i18n:getText a second time
+--- looked it up as if it were a key, and because a mod gets its own
+--- mod-scoped g_i18n the miss surfaced in the UI as
+--- "Missing 'Soybeans' in l10n_en.xml".
 function TransportCompanyContract:getLocalizedFillType()
     if self.fillTypeIndex == nil then
         return ""
     end
-    return g_i18n:getText(g_fillTypeManager:getFillTypeTitleByIndex(self.fillTypeIndex) or "fillType_unknown")
+    return g_fillTypeManager:getFillTypeTitleByIndex(self.fillTypeIndex) or ""
 end
 
 function TransportCompanyContract:getProgressRatio()
@@ -392,8 +400,13 @@ end
 -- Scans the live station lists and emits a fresh contract.
 -- Returns a new contract or nil when no valid route exists.
 
+-- A source has to hold at least this much before a contract is offered
+-- for it, so the job is actually haulable when it appears.
+TransportCompanyContract.MIN_SOURCE_LITERS = 1000
+
 ---@param deadlineDays number|nil Deadline in game days (default 3)
-function TransportCompanyContract.generate(deadlineDays)
+---@param farmId number|nil Farm the board belongs to, for stock access
+function TransportCompanyContract.generate(deadlineDays, farmId)
     local storageSystem = g_currentMission.storageSystem
     if storageSystem == nil then
         return nil
@@ -406,6 +419,12 @@ function TransportCompanyContract.generate(deadlineDays)
     -- the saved reference is (placeable uniqueId, station index). A
     -- station without an owningPlaceable would save as an empty ref and
     -- come back unresolvable, so it is skipped at generation time.
+    -- getSupportedFillTypes lists what a station CAN dispense, not what
+    -- it currently holds. Offering jobs from an empty silo produced
+    -- contracts nobody could run: the player had nothing to load, and a
+    -- hired driver was refused outright with "Loading station is empty!"
+    -- from AIParameterLoadingStation:validate. Only stations holding
+    -- real stock are considered.
     local loadingStations = {}
     for station, _ in pairs(storageSystem.loadingStations) do
         if station ~= nil and station.owningPlaceable ~= nil then
@@ -413,11 +432,15 @@ function TransportCompanyContract.generate(deadlineDays)
             if fillTypes ~= nil then
                 for fillTypeIndex, _ in pairs(fillTypes) do
                     if fillTypeIndex ~= FillType.UNKNOWN then
-                        table.insert(loadingStations, {
-                            ["station"] = station,
-                            ["fillTypeIndex"] = fillTypeIndex,
-                            ["name"] = station:getName(),
-                        })
+                        local available = station:getFillLevel(fillTypeIndex, farmId) or 0
+                        if available >= TransportCompanyContract.MIN_SOURCE_LITERS then
+                            table.insert(loadingStations, {
+                                ["station"] = station,
+                                ["fillTypeIndex"] = fillTypeIndex,
+                                ["name"] = station:getName(),
+                                ["available"] = available,
+                            })
+                        end
                     end
                 end
             end
@@ -485,15 +508,25 @@ function TransportCompanyContract.generate(deadlineDays)
         pricePerLiter = 0.05
     end
 
+    -- Never ask for more than the source can actually supply.
+    local available = source.available or 0
+
     if contract.contractType == TransportCompanyContract.CONTRACT_TYPE_PALLET then
         -- Pallet contract: counted in pallets, delivered in liters.
         -- REWARD_PER_OBJECT mirrors TransportMission.
-        local amount = math.random(4, 12)
+        local maxPallets = math.floor(available / TransportCompanyContract.LITERS_PER_PALLET)
+        local amount = math.min(math.random(4, 12), maxPallets)
+        if amount < 1 then
+            return nil
+        end
         contract.amount = amount
         contract.litersPerUnit = TransportCompanyContract.LITERS_PER_PALLET
         contract.reward = amount * TransportCompanyContract.REWARD_PER_OBJECT
     else
-        local amount = math.random(8000, 24000)
+        local amount = math.min(math.random(8000, 24000), math.floor(available))
+        if amount < TransportCompanyContract.MIN_SOURCE_LITERS then
+            return nil
+        end
         contract.amount = amount
         contract.litersPerUnit = 1
         contract.reward = math.floor(amount * pricePerLiter * 0.15)

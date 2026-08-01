@@ -361,6 +361,21 @@ function TransportCompanyManager:_registerPdaPage()
     end
 end
 
+---The farm that owns the company, taken from any placed HQ.
+---Used for stock access when generating contracts.
+---@return number farmId, 0 when there is no HQ
+function TransportCompanyManager:_getCompanyFarmId()
+    for _, placeable in pairs(self.hqPlaceables) do
+        if placeable ~= nil and placeable.getOwnerFarmId ~= nil then
+            local farmId = placeable:getOwnerFarmId()
+            if farmId ~= nil and farmId > 0 then
+                return farmId
+            end
+        end
+    end
+    return 0
+end
+
 ---Check whether the local player's own farm has at least one HQ.
 ---Drives the PDA tab's enabling predicate, so in multiplayer it must
 ---not be satisfied by a rival farm's headquarters.
@@ -434,8 +449,9 @@ function TransportCompanyManager:_regenerateContractBoard()
     end
 
     local deadlineDays = self.settings:get("contractDeadlineDays") or 7
+    local boardFarmId = self:_getCompanyFarmId()
     while activeCount < maxActive do
-        local contract = TransportCompanyContract.generate(deadlineDays)
+        local contract = TransportCompanyContract.generate(deadlineDays, boardFarmId)
         if contract == nil then break end
         self.contracts[contract.contractId] = contract
         activeCount = activeCount + 1
@@ -635,7 +651,15 @@ function TransportCompanyManager:update(dt)
     self.tickTimer = self.tickTimer + dt
     self.deadlineCheckTimer = self.deadlineCheckTimer + dt
 
-    -- Sample trucks every 1 second
+    -- Distance must be sampled EVERY frame. lastMovedDistance is the
+    -- distance moved in the last physics tick (Vehicle.lua:1484), not a
+    -- running total, so reading it once a second discarded roughly
+    -- 59/60ths of every journey — a truck driven across the map showed
+    -- up as half a metre.
+    self:_sampleDistance()
+
+    -- Fuel is a fill-level delta, so once a second is plenty and keeps
+    -- the per-frame cost down.
     if self.tickTimer >= 1000 then
         self.tickTimer = 0
         self:_sampleTrucks(dt)
@@ -657,13 +681,25 @@ function TransportCompanyManager:update(dt)
     end
 end
 
----Sample fuel and distance for all enrolled trucks.
+---Accumulate per-tick distance for every enrolled truck. Called every
+---frame; see the note in update().
+function TransportCompanyManager:_sampleDistance()
+    for _, truck in pairs(self.trucks) do
+        if truck.isEnrolled then
+            local vehicle = truck:getVehicle()
+            if vehicle ~= nil and not vehicle:getIsBeingDeleted() then
+                truck:sampleDistance(vehicle)
+            end
+        end
+    end
+end
+
+---Sample fuel for all enrolled trucks, and retire the ones that are gone.
 function TransportCompanyManager:_sampleTrucks(dt)
     for _, truck in pairs(self.trucks) do
         local vehicle = truck:getVehicle()
         if vehicle ~= nil and not vehicle:getIsBeingDeleted() then
             truck:sampleFuel(vehicle, dt)
-            truck:sampleDistance(vehicle)
         elseif truck.isEnrolled then
             -- Truck sold or deleted: stop sampling, keep the books.
             truck.isEnrolled = false
@@ -755,15 +791,18 @@ function TransportCompanyManager:onAcceptRequest(contractId, mode, farmId)
         return false
     end
 
-    if isHire and not self:_dispatchHiredDriver(contract, truck) then
-        -- Could not start the AI job — hand the contract back rather
-        -- than leaving it accepted with no driver.
-        contract.state = TransportCompanyContract.STATE_AVAILABLE
-        contract.isHiredDriver = false
-        contract.acceptedTruckUniqueId = ""
-        contract.farmId = 0
-        self:_notify(g_i18n:getText("transportCompany_noTruck"))
-        return false
+    if isHire then
+        local started, reason = self:_dispatchHiredDriver(contract, truck)
+        if not started then
+            -- Could not start the AI job — hand the contract back rather
+            -- than leaving it accepted with no driver.
+            contract.state = TransportCompanyContract.STATE_AVAILABLE
+            contract.isHiredDriver = false
+            contract.acceptedTruckUniqueId = ""
+            contract.farmId = 0
+            self:_notify(reason or g_i18n:getText("transportCompany_noTruck"))
+            return false
+        end
     end
 
     TransportCompanyContractEvent.sendEvent(
@@ -875,6 +914,7 @@ function TransportCompanyManager:_dispatchHiredDriver(contract, truck)
         return false
     end
 
+    local reason = nil
     local ok, result = pcall(function()
         local job = g_currentMission.aiJobTypeManager:createJob(AIJobType.LOAD_AND_DELIVER)
         if job == nil then return false end
@@ -895,6 +935,10 @@ function TransportCompanyManager:_dispatchHiredDriver(contract, truck)
                 "Hired driver rejected for %s: %s",
                 tostring(contract.contractId), tostring(errorMessage)
             )
+            -- Hand the reason back; validate returns a localized string
+            -- like "Loading station is empty!", which is far more use
+            -- than a blanket "no suitable truck".
+            reason = errorMessage
             return false
         end
 
@@ -909,7 +953,7 @@ function TransportCompanyManager:_dispatchHiredDriver(contract, truck)
         TransportCompanyLog.error("Hired driver dispatch failed: %s", tostring(result))
         return false
     end
-    return result == true
+    return result == true, reason
 end
 
 -- ── Delivery detection ─────────────────────────
@@ -1246,7 +1290,8 @@ function TransportCompanyManager:consoleCommandGenerateContract()
     end
 
     local contract = TransportCompanyContract.generate(
-        self.settings:get("contractDeadlineDays") or 7
+        self.settings:get("contractDeadlineDays") or 7,
+        self:_getCompanyFarmId()
     )
     if contract then
         self.contracts[contract.contractId] = contract

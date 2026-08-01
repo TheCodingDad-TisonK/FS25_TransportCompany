@@ -35,6 +35,7 @@
 				  entirely; the three tabs just fill the same slots.
 				-->
 				<ListItem profile="fs25_subCategoryListItem" name="row">
+					<Bitmap profile="fs25_subCategoryListItemIcon" name="icon" imageSize="512 512"/>
 					<Text profile="fs25_tcListPrimary" name="primary"/>
 					<Text profile="fs25_tcListLeft" name="left"/>
 					<Text profile="fs25_tcListRight" name="right"/>
@@ -68,6 +69,7 @@
 			<ThreePartBitmap profile="fs25_tcProgressBg" id="progressBarBg">
 				<ThreePartBitmap profile="fs25_tcProgressBar" id="progressBar"/>
 			</ThreePartBitmap>
+			<Text profile="fs25_tcRewardLabel" id="rewardLabel"/>
 			<Text profile="fs25_tcRewardValue" id="rewardText"/>
 		</GuiElement>
 	</GuiElement>
@@ -102,9 +104,14 @@
 		</Profile>
 
 		<!-- right detail panel -->
+		<!--
+		  Sat at 500px, which pushed the panel hard against the right
+		  edge and left a wide dead strip between it and the list.
+		  Centred in the space the list leaves instead.
+		-->
 		<Profile name="fs25_tcDetailBox" extends="emptyPanel" with="anchorTopLeft">
-			<size value="760px 820px"/>
-			<position value="500px 0px"/>
+			<size value="900px 700px"/>
+			<position value="170px 0px"/>
 		</Profile>
 		<Profile name="fs25_tcDetailTitle" extends="fs25_textDefault" with="anchorTopStretchingX">
 			<size value="100% 44px"/>
@@ -122,9 +129,9 @@
 			<textAlignment value="center"/>
 		</Profile>
 		<Profile name="fs25_tcDetailList" extends="emptyPanel" with="anchorTopCenter">
-			<size value="100% 400px"/>
+			<size value="100% 300px"/>
 			<absoluteSizeOffset value="40px 0px"/>
-			<position value="0px -120px"/>
+			<position value="0px -116px"/>
 			<handleFocus value="false"/>
 		</Profile>
 		<Profile name="fs25_tcDetailItem" extends="baseReference" with="anchorTopStretchingX alternating">
@@ -144,14 +151,14 @@
 			<textColor value="$preset_fs25_colorMainHighlight"/>
 		</Profile>
 		<Profile name="fs25_tcProgressLabel" extends="fs25_textDefault" with="anchorTopCenter">
-			<size value="680px 30px"/>
-			<position value="0px -540px"/>
+			<size value="820px 30px"/>
+			<position value="0px -440px"/>
 			<textBold value="true"/>
 			<textUpperCase value="true"/>
 		</Profile>
 		<Profile name="fs25_tcProgressBg" extends="emptyPanel" with="anchorTopCenter">
-			<size value="680px 33px"/>
-			<position value="0px -578px"/>
+			<size value="820px 33px"/>
+			<position value="0px -476px"/>
 			<imageColor value="$preset_fs25_colorGrey"/>
 			<imageSliceId value="gui.contracts_progressbar_background_middle"/>
 			<startImageSize value="8px 0"/>
@@ -160,7 +167,7 @@
 			<endImageSliceId value="gui.contracts_progressbar_background_right"/>
 		</Profile>
 		<Profile name="fs25_tcProgressBar" extends="baseReference" with="anchorMiddleLeft">
-			<size value="672px 25px"/>
+			<size value="812px 25px"/>
 			<position value="4px 0px"/>
 			<imageColor value="$preset_fs25_colorMainHighlight"/>
 			<imageSliceId value="gui.button_middle"/>
@@ -169,9 +176,16 @@
 			<endImageSize value="6px 0"/>
 			<endImageSliceId value="gui.button_right"/>
 		</Profile>
+		<Profile name="fs25_tcRewardLabel" extends="fs25_textDefault" with="anchorTopCenter">
+			<size value="500px 30px"/>
+			<position value="0px -526px"/>
+			<textBold value="true"/>
+			<textUpperCase value="true"/>
+			<textAlignment value="center"/>
+		</Profile>
 		<Profile name="fs25_tcRewardValue" extends="fs25_textDefault" with="anchorTopCenter">
 			<size value="500px 48px"/>
-			<position value="0px -636px"/>
+			<position value="0px -560px"/>
 			<textSize value="34px"/>
 			<textBold value="true"/>
 			<textAlignment value="center"/>

@@ -113,6 +113,7 @@ function InGameMenuTransportCompanyFrame:initialize()
     self.progressLabel  = self:getDescendantById("progressLabel")
     self.progressBarBg  = self:getDescendantById("progressBarBg")
     self.progressBar    = self:getDescendantById("progressBar")
+    self.rewardLabel    = self:getDescendantById("rewardLabel")
     self.rewardText     = self:getDescendantById("rewardText")
     if self.detailList ~= nil then
         self.detailList:setDataSource(self)
@@ -293,9 +294,12 @@ function InGameMenuTransportCompanyFrame:_buildDispatchRows(manager)
                 stateText = g_i18n:getText("transportCompany_stateAccepted")
             end
 
+            local fillType = g_fillTypeManager:getFillTypeByIndex(contract.fillTypeIndex)
+
             table.insert(self.rows, {
                 cellName = "row",
                 contract = contract,
+                icon     = fillType ~= nil and fillType.hudOverlayFilename or nil,
                 primary  = contract:getLocalizedFillType(),
                 left     = g_i18n:formatMoney(contract.reward, 0, true, true),
                 right    = stateText,
@@ -451,10 +455,20 @@ function InGameMenuTransportCompanyFrame:_buildContractDetail(contract)
         "%d / %d %s", math.floor(contract.delivered),
         math.floor(contract.amount), contract:getAmountUnitText()))
 
-    if self.rewardText ~= nil then
-        self.rewardText:setText(g_i18n:formatMoney(contract.reward, 0, true, true))
-    end
+    self:_setReward("transportCompany_contractReward",
+        g_i18n:formatMoney(contract.reward, 0, true, true))
     return true
+end
+
+---Set the big figure at the bottom of the detail panel, with a label
+---so it is not just an unexplained number.
+function InGameMenuTransportCompanyFrame:_setReward(labelKey, value)
+    if self.rewardLabel ~= nil then
+        self.rewardLabel:setText(g_i18n:getText(labelKey))
+    end
+    if self.rewardText ~= nil then
+        self.rewardText:setText(value)
+    end
 end
 
 ---Ledger detail: the company as a whole. Nothing on this tab maps to
@@ -501,9 +515,7 @@ function InGameMenuTransportCompanyFrame:_buildCompanyDetail()
     self:_addDetail("transportCompany_totalJobs",     tostring(ledger.jobs))
 
     self:_setProgress(0, "")
-    if self.rewardText ~= nil then
-        self.rewardText:setText(money(profit))
-    end
+    self:_setReward("transportCompany_ledgerProfit", money(profit))
     return true
 end
 
@@ -524,9 +536,7 @@ function InGameMenuTransportCompanyFrame:_buildTruckDetail(truck)
     self:_addDetail("transportCompany_fleetJobs", tostring(truck.jobsDelivered))
 
     self:_setProgress(0, "")
-    if self.rewardText ~= nil then
-        self.rewardText:setText(money(truck:getProfit()))
-    end
+    self:_setReward("transportCompany_fleetProfit", money(truck:getProfit()))
     return true
 end
 
@@ -584,10 +594,20 @@ function InGameMenuTransportCompanyFrame:populateCellForItemInSection(list, sect
     if row == nil then
         return
     end
+    -- The icon slot is a Bitmap and takes a filename, the way
+    -- SiloDialog.lua:52 sets a fill type icon. Everything else is text.
+    local icon = cell:getAttribute("icon")
+    if icon ~= nil then
+        icon:setVisible(row.icon ~= nil)
+        if row.icon ~= nil then
+            icon:setImageFilename(row.icon)
+        end
+    end
+
     -- Only string fields map to cell text; cellName and the attached
-    -- contract reference are bookkeeping.
+    -- contract or truck reference are bookkeeping.
     for name, value in pairs(row) do
-        if type(value) == "string" then
+        if name ~= "icon" and type(value) == "string" then
             local element = cell:getAttribute(name)
             if element ~= nil then
                 element:setText(value)
