@@ -1,0 +1,16 @@
+v1.0.0.0
+
+- Initial release
+- Freight contracts generated from the loading and unloading stations already
+  present on your map, priced against the live economy
+- Bulk freight measured in liters, pallet freight in pallets
+- Haul a contract yourself, or hand the route to a hired driver via the base
+  game AI; a job you accepted can still be handed over later
+- Over-delivery rolls onto your next open job instead of being wasted
+- Per-truck books: distance, fuel valued at the live economy price, revenue,
+  driver wages and completed jobs
+- Company ledger with a history of finished and expired contracts
+- In-game settings: board size, deadline, driver wage share, notifications
+- Multiplayer support, server-authoritative
+- English and German
+- Works on any map, no preparation required

@@ -17,8 +17,8 @@ ZIP_PATH = MOD_DIR / f"{MOD_NAME}.zip"
 # Windows default mods path
 MODS_DIR = Path.home() / "Documents" / "My Games" / "FarmingSimulator2025" / "mods"
 
-EXCLUDE_DIRS = {".git", ".github", "__MACOSX", "tools", "tests", ".vscode", "__pycache__"}
-EXCLUDE_EXTS = {".sh", ".py", ".md", ".DS_Store", ".zip", ".ps1"}
+EXCLUDE_DIRS = {".git", ".github", "__MACOSX", "tools", "tests", "docs", ".vscode", "__pycache__"}
+EXCLUDE_EXTS = {".sh", ".py", ".md", ".txt", ".DS_Store", ".zip", ".ps1"}
 # The TestRunner rejects anything outside the allowed extensions
 # (.xml .lua .dds .i3d .shapes .anim .ogg .wav .gls .ogv .gdm .grle
 # .cache), so extensionless repo files must be kept out of the zip.

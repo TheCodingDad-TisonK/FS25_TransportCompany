@@ -1,0 +1,53 @@
+Führe dein eigenes Transportunternehmen.
+
+Auf deiner Karte bewegen Silos, Molkereien und Mühlen längst Waren hin und her
+- nur verdienst du keinen Cent daran. Mit einer eigenen Zentrale ändert sich das.
+
+Kaufe die Transportunternehmen-Zentrale beim Händler (Gebäude > Hallen) und
+stelle sie auf deinem Hof auf. Die Disposition öffnet sich im Spielmenü und hat
+vier Bereiche.
+
+
+DISPOSITION
+
+Frachtaufträge, erzeugt aus den Lade- und Abladestellen, die es auf deiner
+Karte ohnehin gibt, bewertet nach den aktuellen Wirtschaftspreisen. Jeder
+Auftrag nennt Ladestation, Abladestelle, Menge, Vertragswert und Frist.
+Schüttgut wird in Litern gemessen, Palettenfracht in Paletten.
+
+Nimm einen Auftrag an und fahre selbst: an der Ladestation beladen, am Ziel
+abkippen, der Fortschrittsbalken läuft beim Abladen mit. Lieferst du mehr als
+nötig, wird der Überschuss auf deinen nächsten offenen Auftrag angerechnet
+statt verloren zu gehen.
+
+Oder stelle einen Fahrer an und übergib die Route der Spiel-KI als Auftrag
+"Laden und liefern". Umentschieden? Auch einen bereits selbst angenommenen
+Auftrag kannst du später noch einem Fahrer übergeben.
+
+
+FUHRPARK
+
+Jeder LKW führt eigene Bücher: Fahrstrecke, verbrauchter Diesel zum aktuellen
+Wirtschaftspreis, Einnahmen, gezahlte Fahrerlöhne und abgeschlossene Aufträge.
+LKW werden automatisch erfasst, sobald du sie kaufst.
+
+
+BUCHHALTUNG
+
+Unternehmenszahlen sowie eine Übersicht aller abgeschlossenen und erloschenen
+Aufträge.
+
+
+EINSTELLUNGEN
+
+Anzahl der Aufträge, Frist, Fahreranteil und Benachrichtigungen, alles direkt
+im Spiel einstellbar. Im Mehrspieler kann nur der Host sie ändern.
+
+
+Alles nutzt die Mechaniken des Grundspiels: die Spiel-KI, das Finanzsystem, die
+Menü-Elemente, Speicherstände und Mehrspieler.
+
+Es ist keinerlei Vorbereitung der Karte nötig.
+
+Hinweis: Nur Fahrzeuge, die das Grundspiel als LKW einstuft, werden im Fuhrpark
+erfasst. Viele Fahrzeuge gelten als Traktor und erscheinen nicht.

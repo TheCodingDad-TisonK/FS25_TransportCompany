@@ -1,0 +1,50 @@
+Own and operate a trucking company.
+
+Your map is already full of silos, dairies and mills moving goods between them.
+None of it pays you a penny. Buy a headquarters and it does.
+
+Buy the Transport Company HQ from the shop (Buildings > Sheds) and place it on
+your farm. The dispatch office opens in the in-game menu with four sections.
+
+
+DISPATCH
+
+Freight jobs generated from the loading and unloading stations that already
+exist on your map, priced against the live economy. Every job names its pickup,
+its drop-off, the amount, the reward and the deadline. Bulk freight is measured
+in liters, pallet freight in pallets.
+
+Accept a job and haul it yourself: load at the pickup, tip at the destination,
+and watch the progress bar move as you unload. Deliver more than a contract
+needs and the surplus rolls onto your next open job rather than being wasted.
+
+Or hire a driver and hand the route to the base game AI as a Load and Deliver
+job. Changed your mind? A job you accepted for yourself can still be handed to
+a driver later.
+
+
+FLEET
+
+Every truck keeps its own books: distance driven, diesel burned valued at the
+live economy price, revenue earned, driver wages paid and jobs completed.
+Trucks enrol themselves as soon as you buy them.
+
+
+LEDGER
+
+Company totals plus a history of every finished and expired contract.
+
+
+SETTINGS
+
+Board size, deadline, driver wage share and notifications, all editable in
+game. In multiplayer only the host can change them.
+
+
+Everything uses stock FS25 behaviour: the base AI, the base finance system,
+base menu widgets, savegame persistence and multiplayer.
+
+No map preparation of any kind is required.
+
+Note: only vehicles the base game classifies as trucks join the fleet. Many
+vehicles are classified as tractors and will not appear.
