@@ -58,6 +58,7 @@ function TransportCompanyManager.new(modDirectory, modName)
 
     -- Runtime state
     self.isMissionLoaded = false
+    self.isMissionStarted = false
     self.isServer = false
     self.tickTimer = 0
     self.deadlineCheckTimer = 0
@@ -203,7 +204,9 @@ function TransportCompanyManager:_onMissionStarted()
         return
     end
 
-    -- The world exists by now, so stations and placeables resolve.
+    -- The world exists by now, so stations, placeables and the fill
+    -- levels inside their storages all resolve.
+    self.isMissionStarted = true
     self:_loadContracts()
     self:_scanForHqs()
 
@@ -248,6 +251,7 @@ function TransportCompanyManager:_onDeleteMission()
     self.contracts = {}
     self.hqPlaceables = {}
     self.trucks = {}
+    self.isMissionStarted = false
     self.ledger = { revenue = 0, driverWages = 0, jobs = 0 }
     self.isMissionLoaded = false
 end
@@ -454,6 +458,15 @@ end
 ---presence. Called on HQ change and on a timer.
 function TransportCompanyManager:_regenerateContractBoard()
     if not self.isServer then return end
+
+    -- Nothing before the mission actually starts. Placeables exist during
+    -- loading but their storages have not read their fill levels from the
+    -- savegame yet, so every station reports empty and the board fills
+    -- with jobs whose sources look bare. _onMissionStarted regenerates.
+    if not self.isMissionStarted then
+        TransportCompanyLog.debug("board: mission not started, deferring generation")
+        return
+    end
     if not self:_hasHq() then
         TransportCompanyLog.debug("board: no HQ, nothing generated")
         return
