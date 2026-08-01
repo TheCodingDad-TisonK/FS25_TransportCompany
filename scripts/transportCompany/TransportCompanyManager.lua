@@ -487,11 +487,13 @@ function TransportCompanyManager:_regenerateContractBoard()
         -- Generation gave up early. Report what the map actually offers,
         -- so an empty board can be told apart from a map with no viable
         -- routes at all.
-        local ai, any = TransportCompanyContract.countRoutes(boardFarmId)
+        local ai, stocked, routes, stations, orphan =
+            TransportCompanyContract.countRoutes(boardFarmId)
         TransportCompanyLog.info(
-            "board: %d/%d contracts (farm %s; %d AI-haulable sources, "
-            .. "%d stocked sources in total)",
-            activeCount, maxActive, tostring(boardFarmId), ai, any
+            "board: %d/%d contracts (farm %s; %d loading stations, %d without a "
+            .. "placeable, %d routes, %d stocked, %d AI-haulable)",
+            activeCount, maxActive, tostring(boardFarmId),
+            stations, orphan, routes, stocked, ai
         )
     end
 end
