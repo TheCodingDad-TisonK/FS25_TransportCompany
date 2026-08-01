@@ -269,11 +269,18 @@ function TransportCompanyManager:_registerPdaPage()
         -- why the PDA page never appeared. The controller IS the frame
         -- instance; this mirrors InGameMenuContractsFrame.register()
         -- at InGameMenuContractsFrame.lua:15-18.
-        local frameName = "InGameMenuTransportCompanyFrame"
-        local xmlPath = self.modDirectory .. "gui/" .. frameName .. ".xml"
+        local xmlPath = self.modDirectory .. "gui/InGameMenuTransportCompanyFrame.xml"
+
+        -- The GUI name is deliberately not the file name. PagingElement
+        -- titles a tab from g_i18n "ui_" .. element.name
+        -- (PagingElement.lua:47-50), and element.name is whatever is
+        -- passed here — so naming it after the file would look for
+        -- "ui_InGameMenuTransportCompanyFrame" and leave the tab title
+        -- blank. This matches the ui_transportCompanyPage key instead.
+        local guiName = "transportCompanyPage"
 
         local screen = InGameMenuTransportCompanyFrame.new()
-        g_gui:loadGui(xmlPath, frameName, screen, true)
+        g_gui:loadGui(xmlPath, guiName, screen, true)
         self.pdaFrame = screen
 
         -- loadGui already calls exposeControlsAsFields (Gui.lua:216),
@@ -346,7 +353,7 @@ function TransportCompanyManager:_registerPdaPage()
             pcall(inGameMenu.rebuildTabList, inGameMenu)
         end
 
-        TransportCompanyLog.info("PDA page '%s' registered", frameName)
+        TransportCompanyLog.info("PDA page '%s' registered", guiName)
     end)
 
     if not success then
