@@ -222,7 +222,7 @@ end
 
 ---Reload settings from disk (called from console command).
 function TransportCompanyManager:reloadSettings()
-    self.settings:load()
+    self.settings:loadSettings()
     TransportCompanyLog.info("TransportCompanyManager: settings reloaded")
 end
 
@@ -230,8 +230,9 @@ end
 
 ---Register our PDA sub-tab on the in-game menu. Uses the
 ---proven MarketDynamics pattern (pagingElement addElement +
----exposeControlsAsFields + registerPage + addPageTab, all
----pcall-guarded). The tab is hidden when the player has no HQ.
+---exposeControlsAsFields + registerPage + addPageTab +
+---rebuildTabList, all pcall-guarded). The tab is hidden
+---when the player has no HQ.
 function TransportCompanyManager:_registerPdaPage()
     local success, errorMsg = pcall(function()
         if g_gui == nil then return end
@@ -248,8 +249,8 @@ function TransportCompanyManager:_registerPdaPage()
             return
         end
 
-        -- Get the InGameMenu instance (MarketDynamics pattern)
-        local inGameMenu = g_gui.screenControllers[InGameMenu] or g_inGameMenu
+        -- Get the InGameMenu instance
+        local inGameMenu = g_inGameMenu
         if inGameMenu == nil then
             TransportCompanyLog.error("InGameMenu instance not found")
             return
@@ -258,9 +259,18 @@ function TransportCompanyManager:_registerPdaPage()
         -- Expose controls as fields so the paging system can find them
         screen:exposeControlsAsFields()
 
-        -- Add to the paging element
+        -- Add to the paging element (avoid duplicates)
         if inGameMenu.pagingElement ~= nil then
-            inGameMenu.pagingElement:addElement(screen)
+            local alreadyAdded = false
+            for _, el in ipairs(inGameMenu.pagingElement.elements) do
+                if el == screen then
+                    alreadyAdded = true
+                    break
+                end
+            end
+            if not alreadyAdded then
+                inGameMenu.pagingElement:addElement(screen)
+            end
         end
 
         -- Update paging layout
@@ -281,10 +291,15 @@ function TransportCompanyManager:_registerPdaPage()
         end
 
         -- Add the tab button (icon from mod textures)
-        local iconFile = self.modDirectory .. "textures/tab_transportCompany.png"
+        local iconFile = Utils.getFilename("textures/tab_transportCompany.png", self.modDirectory)
         local uvs = {0, 0, 1, 1}
         if type(inGameMenu.addPageTab) == "function" and GuiUtils ~= nil then
             pcall(inGameMenu.addPageTab, inGameMenu, screen, iconFile, GuiUtils.getUVs(uvs))
+        end
+
+        -- Rebuild the tab list so the new tab appears
+        if type(inGameMenu.rebuildTabList) == "function" then
+            pcall(inGameMenu.rebuildTabList, inGameMenu)
         end
 
         TransportCompanyLog.info("PDA page '%s' registered", frameName)
@@ -445,6 +460,30 @@ end
 ---Start the per-frame truck sampling timer (server only).
 function TransportCompanyManager:_startTruckSampling()
     self.tickTimer = 0
+    self.deadlineCheckTimer = 0
+end
+
+---Per-frame update hook (appended to FSBaseMission.update).
+---Drives truck sampling (every 1s) and deadline checks (every 5s).
+---@param dt number Delta time in milliseconds
+function TransportCompanyManager:update(dt)
+    if not self.isMissionLoaded or not self.isServer then return end
+    if not self.settings.enabled then return end
+
+    self.tickTimer = self.tickTimer + dt
+    self.deadlineCheckTimer = self.deadlineCheckTimer + dt
+
+    -- Sample trucks every 1 second
+    if self.tickTimer >= 1000 then
+        self.tickTimer = 0
+        self:_sampleTrucks(dt)
+    end
+
+    -- Check deadlines every 5 seconds
+    if self.deadlineCheckTimer >= 5000 then
+        self.deadlineCheckTimer = 0
+        self:_checkDeadlines()
+    end
 end
 
 ---Sample fuel and distance for all enrolled trucks.
