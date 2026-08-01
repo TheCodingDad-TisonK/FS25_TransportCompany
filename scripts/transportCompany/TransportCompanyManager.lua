@@ -639,6 +639,15 @@ function TransportCompanyManager:update(dt)
         self.deadlineCheckTimer = 0
         self:_checkDeadlines()
     end
+
+    -- Top the board up every 30s. Generation can legitimately fail
+    -- (a station demolished, no route for a fill type), and without a
+    -- retry the board would stay short until the next HQ change.
+    self.boardTimer = (self.boardTimer or 0) + dt
+    if self.boardTimer >= 30000 then
+        self.boardTimer = 0
+        self:_regenerateContractBoard()
+    end
 end
 
 ---Sample fuel and distance for all enrolled trucks.
@@ -656,18 +665,43 @@ function TransportCompanyManager:_sampleTrucks(dt)
 end
 
 ---Check contract deadlines and expire overdue contracts.
+---Expire overdue contracts and refill the board.
+---
+---Both states time out, for different reasons. An ACCEPTED contract
+---that runs out is a job the player failed, so it is marked EXPIRED
+---and kept until cleanup sweeps it. An AVAILABLE one is just a stale
+---listing nobody took: it is dropped outright, which keeps the
+---savegame lean and lets a fresh job take the slot. Without this the
+---board froze with the same jobs forever and then slowly emptied.
 function TransportCompanyManager:_checkDeadlines()
     local now = g_currentMission.time
+    local changed = false
 
     for contractId, contract in pairs(self.contracts) do
-        if contract.state == TransportCompanyContract.STATE_ACCEPTED and
-           contract:getIsExpired(now) then
-            contract:expire()
-            TransportCompanyContractEvent.sendEvent(
-                TransportCompanyContractEvent.TYPE_STATE_CHANGE, contract,
-                TransportCompanyContract.STATE_EXPIRED
-            )
+        if contract:getIsExpired(now) then
+            if contract.state == TransportCompanyContract.STATE_ACCEPTED then
+                contract:expire()
+                TransportCompanyContractEvent.sendEvent(
+                    TransportCompanyContractEvent.TYPE_STATE_CHANGE, contract,
+                    TransportCompanyContract.STATE_EXPIRED
+                )
+                self:_notify(string.format(
+                    g_i18n:getText("transportCompany_contractExpired"),
+                    contract:getLocalizedFillType()
+                ))
+                changed = true
+            elseif contract.state == TransportCompanyContract.STATE_AVAILABLE then
+                self.contracts[contractId] = nil
+                TransportCompanyContractEvent.sendEvent(
+                    TransportCompanyContractEvent.TYPE_REMOVE, contract
+                )
+                changed = true
+            end
         end
+    end
+
+    if changed then
+        self:_regenerateContractBoard()
     end
 end
 
@@ -705,6 +739,8 @@ function TransportCompanyManager:onAcceptRequest(contractId, mode, farmId)
             "Accept refused for %s: no AI-capable truck on farm %d",
             tostring(contractId), farmId
         )
+        -- Say so: a button that silently does nothing reads as broken.
+        self:_notify(g_i18n:getText("transportCompany_noTruck"))
         return false
     end
 
@@ -719,6 +755,7 @@ function TransportCompanyManager:onAcceptRequest(contractId, mode, farmId)
         contract.isHiredDriver = false
         contract.acceptedTruckUniqueId = ""
         contract.farmId = 0
+        self:_notify(g_i18n:getText("transportCompany_noTruck"))
         return false
     end
 
