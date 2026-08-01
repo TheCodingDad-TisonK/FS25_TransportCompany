@@ -296,6 +296,40 @@ function TransportCompanyContract:getIsExpired(now)
     return self.deadline - now <= 0
 end
 
+--- Can the base game AI actually run this job for a farm?
+---
+--- AIParameterLoadingStation:validate applies two tests my generation
+--- does not: the fill type has to be AI-supported (a narrower set than
+--- getSupportedFillTypes), and getFillLevel is farm-access gated. A
+--- station can hold plenty and still be "empty" to a given farm, which
+--- is why hiring failed on contracts that looked perfectly fine.
+---@return boolean haulable, string|nil reasonKey
+function TransportCompanyContract:getIsAiHaulable(farmId)
+    if farmId == nil or farmId <= 0 then
+        return false, "transportCompany_hireNoFarm"
+    end
+
+    local source = self:getSourceStation()
+    if source == nil then
+        return false, "transportCompany_hireNoStation"
+    end
+    if self:getDestStation() == nil then
+        return false, "transportCompany_hireNoStation"
+    end
+
+    if source.getIsFillTypeAISupported ~= nil
+       and not source:getIsFillTypeAISupported(self.fillTypeIndex) then
+        return false, "transportCompany_hireNotAiFillType"
+    end
+
+    if source.getFillLevel ~= nil
+       and (source:getFillLevel(self.fillTypeIndex, farmId) or 0) <= 0 then
+        return false, "transportCompany_hireStationEmpty"
+    end
+
+    return true, nil
+end
+
 -- ── Lifecycle transitions ──────────────────────────────────
 -- Server-side state changes. The manager broadcasts a
 -- TransportCompanyContractEvent after each of these so clients
@@ -454,6 +488,7 @@ function TransportCompanyContract.generate(deadlineDays, farmId)
     -- from AIParameterLoadingStation:validate. Only stations holding
     -- real stock are considered.
     local loadingStations = {}
+    local aiStations = {}
     for station, _ in pairs(storageSystem.loadingStations) do
         if station ~= nil and station.owningPlaceable ~= nil then
             local fillTypes = station:getSupportedFillTypes()
@@ -463,12 +498,26 @@ function TransportCompanyContract.generate(deadlineDays, farmId)
                         local available = TransportCompanyContract.getStationStock(
                             station, fillTypeIndex, farmId)
                         if available >= TransportCompanyContract.MIN_SOURCE_LITERS then
-                            table.insert(loadingStations, {
+                            -- Prefer routes a hired driver could also run:
+                            -- AI-supported fill type and stock this farm can
+                            -- actually draw. Everything else still works for
+                            -- a player hauling it personally.
+                            local aiOk =
+                                (station.getIsFillTypeAISupported == nil
+                                 or station:getIsFillTypeAISupported(fillTypeIndex))
+                                and farmId ~= nil and farmId > 0
+                                and (station:getFillLevel(fillTypeIndex, farmId) or 0) > 0
+                            local entry = {
                                 ["station"] = station,
                                 ["fillTypeIndex"] = fillTypeIndex,
                                 ["name"] = station:getName(),
                                 ["available"] = available,
-                            })
+                            }
+                            if aiOk then
+                                table.insert(aiStations, entry)
+                            else
+                                table.insert(loadingStations, entry)
+                            end
                         end
                     end
                 end
@@ -476,12 +525,14 @@ function TransportCompanyContract.generate(deadlineDays, farmId)
         end
     end
 
-    if #loadingStations == 0 then
+    -- AI-capable routes first so "Hire driver" usually works.
+    local pool = #aiStations > 0 and aiStations or loadingStations
+    if #pool == 0 then
         return nil
     end
 
     -- Pick a random source + fill type.
-    local source = loadingStations[math.random(1, #loadingStations)]
+    local source = pool[math.random(1, #pool)]
     local contract = TransportCompanyContract.new()
     contract.fillTypeIndex = source.fillTypeIndex
     contract.sourceName = source.name or ""

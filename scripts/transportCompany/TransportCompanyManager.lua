@@ -792,10 +792,27 @@ function TransportCompanyManager:onAcceptRequest(contractId, mode, farmId)
     if not self.isServer then return false end
 
     local contract = self.contracts[contractId]
-    if contract == nil or contract.state ~= TransportCompanyContract.STATE_AVAILABLE then
+    if contract == nil then
         return false
     end
     if farmId == nil or farmId <= 0 then
+        return false
+    end
+
+    local isHire = mode == TransportCompanyAcceptEvent.MODE_HIRE
+
+    -- Hiring a driver for a job you already took is a normal thing to
+    -- want: take it, look at the route, decide to hand it over. That
+    -- used to be impossible because both buttons disappeared the moment
+    -- a contract left AVAILABLE.
+    if contract.state == TransportCompanyContract.STATE_ACCEPTED then
+        if isHire and not contract.isHiredDriver and contract.farmId == farmId then
+            return self:_hireForAcceptedContract(contract, farmId)
+        end
+        return false
+    end
+
+    if contract.state ~= TransportCompanyContract.STATE_AVAILABLE then
         return false
     end
 
@@ -804,8 +821,19 @@ function TransportCompanyManager:onAcceptRequest(contractId, mode, farmId)
     contract.deadline = g_currentMission.time
         + TransportCompanyContract.DAY_LENGTH * deadlineDays
 
-    local isHire = mode == TransportCompanyAcceptEvent.MODE_HIRE
     local truck = isHire and self:_findTruckForContract(contract, farmId) or nil
+
+    if isHire then
+        -- Check the job before touching contract state, so a refusal
+        -- leaves the board exactly as it was.
+        local haulable, reasonKey = contract:getIsAiHaulable(farmId)
+        if not haulable then
+            TransportCompanyLog.info(
+                "Hire refused for %s: %s", tostring(contractId), tostring(reasonKey))
+            self:_notify(g_i18n:getText(reasonKey))
+            return false
+        end
+    end
 
     if isHire and truck == nil then
         TransportCompanyLog.info(
@@ -842,6 +870,46 @@ function TransportCompanyManager:onAcceptRequest(contractId, mode, farmId)
         g_i18n:getText("transportCompany_contractAccepted"),
         contract:getLocalizedFillType(), contract.destName,
         g_i18n:formatMoney(contract.reward, 0, true, true)
+    ))
+    return true
+end
+
+---Put a driver on a contract this farm already accepted.
+---@return boolean started
+function TransportCompanyManager:_hireForAcceptedContract(contract, farmId)
+    local haulable, reasonKey = contract:getIsAiHaulable(farmId)
+    if not haulable then
+        TransportCompanyLog.info(
+            "Hire refused for %s: %s", tostring(contract.contractId), tostring(reasonKey))
+        self:_notify(g_i18n:getText(reasonKey))
+        return false
+    end
+
+    local truck = self:_findTruckForContract(contract, farmId)
+    if truck == nil then
+        self:_notify(g_i18n:getText("transportCompany_noTruck"))
+        return false
+    end
+
+    local previousTruck = contract.acceptedTruckUniqueId
+    contract.isHiredDriver = true
+    contract.acceptedTruckUniqueId = truck.uniqueId
+
+    local started, reason = self:_dispatchHiredDriver(contract, truck)
+    if not started then
+        -- Leave the contract accepted and player-hauled, as it was.
+        contract.isHiredDriver = false
+        contract.acceptedTruckUniqueId = previousTruck
+        self:_notify(reason or g_i18n:getText("transportCompany_noTruck"))
+        return false
+    end
+
+    TransportCompanyContractEvent.sendEvent(
+        TransportCompanyContractEvent.TYPE_UPDATE, contract
+    )
+    self:_notify(string.format(
+        g_i18n:getText("transportCompany_driverDispatched"),
+        truck.vehicleName or "", contract:getLocalizedFillType()
     ))
     return true
 end

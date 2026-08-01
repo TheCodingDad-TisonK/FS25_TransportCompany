@@ -108,5 +108,9 @@
         <e k="transportCompany_settingDesc_showNotifications" v="Show a message when a contract is accepted, delivered or expires."/>
         <e k="transportCompany_setting_debugMode" v="Debug logging"/>
         <e k="transportCompany_settingDesc_debugMode" v="Verbose output in log.txt. Saved per player, off by default."/>
+        <e k="transportCompany_hireStationEmpty" v="The pickup station has none of these goods available to your farm, so a hired driver has nothing to load. Haul it yourself, or wait for the station to restock."/>
+        <e k="transportCompany_hireNotAiFillType" v="Hired drivers cannot load these goods at this station. You can still haul it yourself."/>
+        <e k="transportCompany_hireNoStation" v="This contract's pickup or drop-off station no longer exists."/>
+        <e k="transportCompany_hireNoFarm" v="No farm owns this contract."/>
     </elements>
 </l10n>

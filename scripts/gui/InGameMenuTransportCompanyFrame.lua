@@ -254,9 +254,15 @@ function InGameMenuTransportCompanyFrame:_updateMenuButtons()
         end
     else
         local contract = self:getSelectedContract()
-        if contract ~= nil and contract.state == TransportCompanyContract.STATE_AVAILABLE then
-            table.insert(buttons, self.acceptButtonInfo)
-            table.insert(buttons, self.hireButtonInfo)
+        if contract ~= nil then
+            if contract.state == TransportCompanyContract.STATE_AVAILABLE then
+                table.insert(buttons, self.acceptButtonInfo)
+                table.insert(buttons, self.hireButtonInfo)
+            elseif contract.state == TransportCompanyContract.STATE_ACCEPTED
+                   and not contract.isHiredDriver then
+                -- A job you took can still be handed to a driver.
+                table.insert(buttons, self.hireButtonInfo)
+            end
         end
     end
 
