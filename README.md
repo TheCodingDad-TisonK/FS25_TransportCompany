@@ -20,7 +20,7 @@
 
 Buy a headquarters and it does. Freight jobs are generated from the stations that already exist on your map, priced against the live economy. Haul them yourself, or put a driver in the cab and let the base game AI run the route while your fleet quietly books the miles, the diesel and the profit — truck by truck.
 
-`Singleplayer` • `Multiplayer (server-authoritative)` • `Persistent saves` • `Any map, no preparation`
+`Singleplayer` • `Multiplayer (server-authoritative)` • `Persistent saves` • `English & Deutsch` • `Any map, no preparation`
 
 </div>
 
