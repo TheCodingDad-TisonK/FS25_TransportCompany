@@ -28,6 +28,7 @@
         <e k="transportCompany_statusCompleted" v="Completed"/>
         <e k="transportCompany_statusExpired" v="Expired"/>
         <e k="transportCompany_statusFailed" v="Failed"/>
+        <e k="transportCompany_noHq" v="No Transport Company yet. Buy the Transport Company HQ from the shop (Buildings &gt; Sheds) and place it on your farm to open the dispatch office."/>
         <e k="transportCompany_noContracts" v="No contracts available right now. New jobs arrive as the days go by."/>
         <e k="transportCompany_noActiveContracts" v="No active contracts. Accept a job from the dispatch board."/>
         <e k="transportCompany_acceptContract" v="Accept contract"/>

@@ -97,8 +97,9 @@ function InGameMenuTransportCompanyFrame:initialize()
         self.subCategorySelector:setState(self.currentTab, true)
     end
 
-    -- Content list
+    -- Content list + the message shown when it has nothing in it
     self.contentList = self:getDescendantById("contentList")
+    self.emptyText = self:getDescendantById("noContractsText")
     if self.contentList ~= nil then
         self.contentList:setDataSource(self)
     end
@@ -150,10 +151,29 @@ function InGameMenuTransportCompanyFrame:updateTabContent()
         end
     end
 
+    self:_updateEmptyText(manager)
+
     if self.contentList ~= nil then
         self.contentList:reloadData()
     end
     self:_updateMenuButtons()
+end
+
+---Tell the player why the list is empty.
+---
+---Without an HQ there is no company at all, and that is by far the
+---most likely reason someone is staring at a blank page — so say so
+---explicitly rather than showing the generic "no contracts" line.
+function InGameMenuTransportCompanyFrame:_updateEmptyText(manager)
+    if self.emptyText == nil then return end
+
+    local key = "transportCompany_noContracts"
+    if manager == nil or not manager:_hasHq() then
+        key = "transportCompany_noHq"
+    elseif self.currentTab == InGameMenuTransportCompanyFrame.TAB_FLEET then
+        key = "transportCompany_fleetNoTrucks"
+    end
+    self.emptyText:setText(g_i18n:getText(key))
 end
 
 ---The contract under the cursor, or nil when the selection is not an
@@ -170,6 +190,10 @@ end
 
 ---Show Accept / Hire only on the Dispatch tab, and only when the
 ---highlighted contract is still available.
+---
+---setMenuButtonInfo alone does nothing visible: TabbedMenu only re-reads
+---a page's buttons when the page reports itself dirty
+---(TabbedMenu.lua:117-119), which is why the footer stayed empty.
 function InGameMenuTransportCompanyFrame:_updateMenuButtons()
     local buttons = { self.backButtonInfo }
 
@@ -180,6 +204,7 @@ function InGameMenuTransportCompanyFrame:_updateMenuButtons()
     end
 
     self:setMenuButtonInfo(buttons)
+    self:setMenuButtonInfoDirty()
 end
 
 ---Selection changed in the list — the buttons may need to appear or
@@ -230,10 +255,24 @@ function InGameMenuTransportCompanyFrame:_buildDispatchRows(manager)
                 stateText = g_i18n:getText("transportCompany_stateAccepted")
             end
 
+            -- A transport job is meaningless without its route, so the
+            -- pickup -> dropoff pair is on the row itself rather than
+            -- hidden behind a detail panel.
+            local route = string.format("%s  >  %s",
+                contract.sourceName ~= "" and contract.sourceName or "?",
+                contract.destName ~= "" and contract.destName or "?")
+
+            local timeLeft = contract:getTimeLeft()
+            if contract.state == TransportCompanyContract.STATE_ACCEPTED and timeLeft ~= nil then
+                local days = timeLeft / TransportCompanyContract.DAY_LENGTH
+                stateText = string.format("%s  (%.1fd)", stateText, math.max(0, days))
+            end
+
             table.insert(self.rows, {
                 cellName = "contractItem",
                 contract = contract,
-                type = string.format("%s - %s", typeText, contract:getLocalizedFillType()),
+                type = string.format("%s  -  %s", typeText, contract:getLocalizedFillType()),
+                route = route,
                 state = stateText,
                 progress = string.format(
                     "%d / %d %s",

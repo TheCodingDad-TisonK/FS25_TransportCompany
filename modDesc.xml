@@ -30,6 +30,11 @@ v1.0.0.0 - ModHub-ready release
     <iconFilename>textures/icon.png</iconFilename>
     <multiplayer supported="true"/>
 
+    <!-- Register the brand so the shop stops falling back to LIZARD -->
+    <brands>
+        <brand name="TISONK" title="TisonK"/>
+    </brands>
+
     <storeItems>
         <storeItem xmlFilename="dataS/placeables/transportCompanyHq/transportCompanyHq.xml"/>
     </storeItems>

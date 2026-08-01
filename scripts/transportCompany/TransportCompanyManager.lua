@@ -314,9 +314,16 @@ function TransportCompanyManager:_registerPdaPage()
             pcall(inGameMenu.pagingElement.updatePageMapping, inGameMenu.pagingElement)
         end
 
-        -- Register as a page with an enabling predicate (hidden when no HQ)
+        -- The page stays enabled even with no HQ.
+        --
+        -- It used to be gated on _hasHq(), which is re-evaluated every
+        -- time the menu opens (TabbedMenu:updatePages, TabbedMenu.lua:79)
+        -- so it did work — but a tab that is simply absent until you
+        -- happen to buy the right building is undiscoverable, and reads
+        -- as "the mod is broken". The frame now shows a message telling
+        -- the player to place an HQ instead of hiding itself.
         local enablePredicate = function()
-            return self:_hasHq()
+            return true
         end
 
         if type(inGameMenu.registerPage) == "function" then

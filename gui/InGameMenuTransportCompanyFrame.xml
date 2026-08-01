@@ -16,23 +16,27 @@
 			     it (SmoothListElement.lua:255) and getCellTypeForItemInSection
 			     returns that name to pick a row layout. -->
 			<SmoothList profile="fs25_subCategoryList" id="contentList" onClick="onListSelectionChanged" startClipperElementName="startClipper" endClipperElementName="endClipper" emptyIndicatorId="noContractsText">
+				<!-- Dispatch: title line, then route / progress / reward / state -->
 				<ListItem profile="fs25_subCategoryListItem" name="contractItem">
 					<Text profile="fs25_subCategoryListItemName" name="type"/>
-					<Text profile="fs25_transportCompanyListItemTime" name="state"/>
-					<Text profile="fs25_transportCompanyListItemProgress" name="progress"/>
-					<Text profile="fs25_transportCompanyListItemReward" name="reward"/>
+					<Text profile="fs25_tcCol1" name="route"/>
+					<Text profile="fs25_tcCol2" name="progress"/>
+					<Text profile="fs25_tcCol4" name="reward"/>
+					<Text profile="fs25_tcRight" name="state"/>
 				</ListItem>
+				<!-- Fleet: truck name, then distance / fuel / jobs / profit -->
 				<ListItem profile="fs25_subCategoryListItem" name="fleetItem">
 					<Text profile="fs25_subCategoryListItemName" name="name"/>
-					<Text profile="fs25_transportCompanyListItemTime" name="distance"/>
-					<Text profile="fs25_transportCompanyListItemProgress" name="fuel"/>
-					<Text profile="fs25_transportCompanyListItemJobs" name="jobs"/>
-					<Text profile="fs25_transportCompanyListItemReward" name="profit"/>
-					<Text profile="fs25_transportCompanyListItemRevenue" name="revenue"/>
+					<Text profile="fs25_tcCol1" name="distance"/>
+					<Text profile="fs25_tcCol2" name="fuel"/>
+					<Text profile="fs25_tcCol3" name="jobs"/>
+					<Text profile="fs25_tcCol4" name="profit"/>
+					<Text profile="fs25_tcRight" name="revenue"/>
 				</ListItem>
+				<!-- Ledger: label on the left, value on the right -->
 				<ListItem profile="fs25_subCategoryListItem" name="ledgerItem">
 					<Text profile="fs25_subCategoryListItemName" name="label"/>
-					<Text profile="fs25_transportCompanyListItemReward" name="value"/>
+					<Text profile="fs25_tcRight" name="value"/>
 				</ListItem>
 			</SmoothList>
 			<ThreePartBitmap profile="fs25_subCategoryListSliderBox">
@@ -45,44 +49,45 @@
 	     (SmoothListElement.lua:238), so the element it names has to
 	     exist somewhere in this GUI or the indicator is never shown. -->
 	<GuiElement profile="fs25_menuContentContainer">
-		<Text profile="fs25_transportCompanyEmptyText" id="noContractsText" text="$l10n_transportCompany_noContracts"/>
+		<Text profile="fs25_transportCompanyEmptyText" id="noContractsText" text="$l10n_transportCompany_noHq"/>
 	</GuiElement>
 
 	<!-- fs25_contractsListItemTime / fs25_contractsListItemReward are
 	     declared locally inside dataS/gui/InGameMenuContractsFrame.xml,
 	     not in dataS/guiProfiles.xml — they are not global and cannot be
-	     referenced from here. These are equivalent local declarations. -->
+	     referenced from here. These are local equivalents, laid out as
+	     four columns plus a right-aligned slot. -->
 	<GUIProfiles>
-		<Profile name="fs25_transportCompanyListItemTime" extends="fs25_textDarkHighlight" with="anchorBottomRight">
-			<position value="-38px 30px"/>
-			<textAlignment value="right"/>
-		</Profile>
-		<Profile name="fs25_transportCompanyListItemReward" extends="fs25_textDarkHighlight" with="anchorBottomLeft">
+		<Profile name="fs25_tcCol1" extends="fs25_textDarkHighlight" with="anchorBottomLeft">
 			<position value="100px 30px"/>
-			<textSize value="26px"/>
+			<textSize value="24px"/>
 			<textVerticalAlignment value="bottom"/>
+			<textColor value="$preset_fs25_colorMainLight"/>
+		</Profile>
+		<Profile name="fs25_tcCol2" extends="fs25_tcCol1">
+			<position value="470px 30px"/>
+		</Profile>
+		<Profile name="fs25_tcCol3" extends="fs25_tcCol1">
+			<position value="700px 30px"/>
+		</Profile>
+		<Profile name="fs25_tcCol4" extends="fs25_tcCol1">
+			<position value="840px 30px"/>
+			<textSize value="26px"/>
 			<textColor value="$preset_fs25_colorMainHighlight"/>
 			<textFocusedColor value="$preset_fs25_colorMainLight"/>
 			<textHighlightedColor value="$preset_fs25_colorMainHighlight"/>
 		</Profile>
-		<Profile name="fs25_transportCompanyListItemProgress" extends="fs25_transportCompanyListItemReward">
-			<position value="320px 30px"/>
-			<textColor value="$preset_fs25_colorMainLight"/>
-		</Profile>
-		<Profile name="fs25_transportCompanyListItemJobs" extends="fs25_transportCompanyListItemReward">
-			<position value="520px 30px"/>
-			<textColor value="$preset_fs25_colorMainLight"/>
-		</Profile>
-		<Profile name="fs25_transportCompanyListItemRevenue" extends="fs25_transportCompanyListItemReward">
-			<position value="660px 30px"/>
-			<textColor value="$preset_fs25_colorMainLight"/>
+		<Profile name="fs25_tcRight" extends="fs25_textDarkHighlight" with="anchorBottomRight">
+			<position value="-38px 30px"/>
+			<textSize value="24px"/>
+			<textAlignment value="right"/>
 		</Profile>
 		<Profile name="fs25_transportCompanyEmptyText" extends="fs25_textDefault" with="anchorMiddleCenter">
-			<size value="500px 100px"/>
+			<size value="560px 120px"/>
 			<position value="0px 57px"/>
 			<textSize value="26px"/>
 			<textAlignment value="center"/>
-			<textWrapWidth value="475px"/>
+			<textWrapWidth value="530px"/>
 			<textMaxNumLines value="4"/>
 		</Profile>
 	</GUIProfiles>
