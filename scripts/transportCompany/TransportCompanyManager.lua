@@ -49,6 +49,13 @@ function TransportCompanyManager.new(modDirectory, modName)
     self.contracts = {}       -- contractId → TransportCompanyContract
     self.hqPlaceables = {}    -- placeableUniqueId → placeable ref
 
+    -- Company-level books. Kept separately from the per-truck books
+    -- because a self-hauled delivery cannot be attributed to a truck:
+    -- the station hook reports liters and fill position, never the
+    -- vehicle that tipped them. Without this the Ledger would show no
+    -- revenue for any contract the player hauled personally.
+    self.ledger = { revenue = 0, driverWages = 0, jobs = 0 }
+
     -- Runtime state
     self.isMissionLoaded = false
     self.isServer = false
@@ -120,6 +127,9 @@ function TransportCompanyManager:load()
             end
         )
     end
+
+    -- Delivery detection: credit contracts when goods reach a station
+    self:_installDeliveryHooks()
 
     -- Console commands (debug/test behind debugMode gate)
     self:_registerConsoleCommands()
@@ -220,6 +230,7 @@ function TransportCompanyManager:_onDeleteMission()
     self.contracts = {}
     self.hqPlaceables = {}
     self.trucks = {}
+    self.ledger = { revenue = 0, driverWages = 0, jobs = 0 }
     self.isMissionLoaded = false
 end
 
@@ -456,6 +467,10 @@ function TransportCompanyManager:_saveContracts()
         truckIdx = truckIdx + 1
     end
 
+    xmlFile:setFloat("transportCompany.ledger#revenue", self.ledger.revenue)
+    xmlFile:setFloat("transportCompany.ledger#driverWages", self.ledger.driverWages)
+    xmlFile:setInt("transportCompany.ledger#jobs", self.ledger.jobs)
+
     xmlFile:save()
     xmlFile:delete()
 
@@ -501,6 +516,10 @@ function TransportCompanyManager:_loadContracts()
         self.trucks[truck.uniqueId] = truck
         truckIdx = truckIdx + 1
     end
+
+    self.ledger.revenue = xmlFile:getFloat("transportCompany.ledger#revenue", 0)
+    self.ledger.driverWages = xmlFile:getFloat("transportCompany.ledger#driverWages", 0)
+    self.ledger.jobs = xmlFile:getInt("transportCompany.ledger#jobs", 0)
 
     xmlFile:delete()
 
@@ -638,6 +657,302 @@ function TransportCompanyManager:_checkDeadlines()
     end
 end
 
+-- ── Accepting a contract ───────────────────────
+
+---Server-side handler for an accept request. Reached from the PDA
+---button (directly on a listen server, via TransportCompanyAcceptEvent
+---from a client). Validates, accepts, and for MODE_HIRE also starts a
+---base game AI job.
+---@param contractId string
+---@param mode number TransportCompanyAcceptEvent.MODE_SELF or MODE_HIRE
+---@param farmId number
+---@return boolean accepted
+function TransportCompanyManager:onAcceptRequest(contractId, mode, farmId)
+    if not self.isServer then return false end
+
+    local contract = self.contracts[contractId]
+    if contract == nil or contract.state ~= TransportCompanyContract.STATE_AVAILABLE then
+        return false
+    end
+    if farmId == nil or farmId <= 0 then
+        return false
+    end
+
+    -- The deadline clock starts now, not at generation time.
+    local deadlineDays = self.settings:get("contractDeadlineDays") or 7
+    contract.deadline = g_currentMission.time
+        + TransportCompanyContract.DAY_LENGTH * deadlineDays
+
+    local isHire = mode == TransportCompanyAcceptEvent.MODE_HIRE
+    local truck = isHire and self:_findTruckForContract(contract, farmId) or nil
+
+    if isHire and truck == nil then
+        TransportCompanyLog.info(
+            "Accept refused for %s: no AI-capable truck on farm %d",
+            tostring(contractId), farmId
+        )
+        return false
+    end
+
+    if not contract:accept(farmId, truck ~= nil and truck.uniqueId or "", isHire) then
+        return false
+    end
+
+    if isHire and not self:_dispatchHiredDriver(contract, truck) then
+        -- Could not start the AI job — hand the contract back rather
+        -- than leaving it accepted with no driver.
+        contract.state = TransportCompanyContract.STATE_AVAILABLE
+        contract.isHiredDriver = false
+        contract.acceptedTruckUniqueId = ""
+        contract.farmId = 0
+        return false
+    end
+
+    TransportCompanyContractEvent.sendEvent(
+        TransportCompanyContractEvent.TYPE_UPDATE, contract
+    )
+    self:_notify(string.format(
+        g_i18n:getText("transportCompany_contractAccepted"),
+        contract:getLocalizedFillType(), contract.destName,
+        g_i18n:formatMoney(contract.reward, 0, true, true)
+    ))
+    return true
+end
+
+---Pick an enrolled truck on this farm that the base game AI will
+---actually accept for a load-and-deliver job.
+---@return TransportCompanyTruck|nil
+function TransportCompanyManager:_findTruckForContract(contract, farmId)
+    local probe = g_currentMission.aiJobTypeManager:createJob(AIJobType.LOAD_AND_DELIVER)
+    if probe == nil then return nil end
+
+    for _, truck in pairs(self.trucks) do
+        if truck.farmId == farmId then
+            local vehicle = truck:getVehicle()
+            -- getIsAvailableForVehicle is the engine's own suitability
+            -- test (AIJobLoadAndDeliver.lua:376): AI-capable, not in
+            -- use, and has both loading and discharge nodes.
+            if vehicle ~= nil and not vehicle:getIsBeingDeleted()
+               and probe:getIsAvailableForVehicle(vehicle) then
+                return truck
+            end
+        end
+    end
+    return nil
+end
+
+---Build and start an AIJobLoadAndDeliver for a contract.
+---@return boolean started
+function TransportCompanyManager:_dispatchHiredDriver(contract, truck)
+    local vehicle = truck ~= nil and truck:getVehicle() or nil
+    local sourceStation = contract:getSourceStation()
+    local destStation = contract:getDestStation()
+    if vehicle == nil or sourceStation == nil or destStation == nil then
+        return false
+    end
+
+    local ok, result = pcall(function()
+        local job = g_currentMission.aiJobTypeManager:createJob(AIJobType.LOAD_AND_DELIVER)
+        if job == nil then return false end
+
+        job.vehicleParameter:setVehicle(vehicle)
+        job.loadingStationParameter:setLoadingStation(sourceStation)
+        job.unloadingStationParameter:setUnloadingStation(destStation)
+        job.fillTypeParameter:setFillTypeIndex(contract.fillTypeIndex)
+        -- One run, not a loop: the contract has a fixed amount.
+        job.loopingParameter:setIsLooping(false)
+
+        -- setValues populates the loading/discharge node info that
+        -- validate() then checks (AIJobLoadAndDeliver.lua:45,152).
+        job:setValues()
+        local isValid, errorMessage = job:validate(contract.farmId)
+        if not isValid then
+            TransportCompanyLog.info(
+                "Hired driver rejected for %s: %s",
+                tostring(contract.contractId), tostring(errorMessage)
+            )
+            return false
+        end
+
+        -- startJob assigns the id we later match in AI_JOB_STOPPED
+        -- (AISystem.lua:355-362).
+        g_currentMission.aiSystem:startJob(job, contract.farmId)
+        contract.hiredDriverJobId = job.jobId or 0
+        return true
+    end)
+
+    if not ok then
+        TransportCompanyLog.error("Hired driver dispatch failed: %s", tostring(result))
+        return false
+    end
+    return result == true
+end
+
+-- ── Delivery detection ─────────────────────────
+
+---Install the delivery hooks. A station reports goods arriving
+---through addFillLevelFromTool and returns how much it actually took,
+---which is exactly the quantity a contract should be credited with.
+---
+---SellingStation overrides the method and only sometimes calls its
+---super (SellingStation.lua:305-327), so both classes are hooked and a
+---depth counter keeps the inner super call from crediting twice.
+function TransportCompanyManager:_installDeliveryHooks()
+    local function makeHook(className)
+        return function(station, superFunc, farmId, deltaFillLevel, fillType, fillInfo, toolType, extraAttributes)
+            local moved = superFunc(station, farmId, deltaFillLevel, fillType, fillInfo, toolType, extraAttributes)
+            local mgr = g_transportCompanyManager
+            if mgr ~= nil then
+                mgr._deliveryDepth = (mgr._deliveryDepth or 0) + 1
+                if mgr._deliveryDepth == 1 and moved ~= nil and moved > 0 then
+                    local ok, err = pcall(
+                        mgr.onGoodsDelivered, mgr, station, farmId, moved, fillType
+                    )
+                    if not ok then
+                        TransportCompanyLog.error(
+                            "%s delivery credit failed: %s", className, tostring(err)
+                        )
+                    end
+                end
+                mgr._deliveryDepth = mgr._deliveryDepth - 1
+            end
+            return moved
+        end
+    end
+
+    UnloadingStation.addFillLevelFromTool = Utils.overwrittenFunction(
+        UnloadingStation.addFillLevelFromTool, makeHook("UnloadingStation")
+    )
+    if SellingStation ~= nil then
+        SellingStation.addFillLevelFromTool = Utils.overwrittenFunction(
+            SellingStation.addFillLevelFromTool, makeHook("SellingStation")
+        )
+    end
+end
+
+---Credit goods that just arrived at a station against open contracts.
+---Server-side only: contract state and payouts are authoritative.
+---@param station table The receiving station
+---@param farmId number Farm that delivered
+---@param liters number Liters the station actually accepted
+---@param fillType number Fill type index
+function TransportCompanyManager:onGoodsDelivered(station, farmId, liters, fillType)
+    if not self.isServer or not self.isMissionLoaded then return end
+    if not self.settings:get("enabled") then return end
+    if station == nil or farmId == nil or farmId <= 0 then return end
+
+    local remaining = liters
+    for _, contract in pairs(self.contracts) do
+        if remaining <= 0 then break end
+        if contract.state == TransportCompanyContract.STATE_ACCEPTED
+           and contract.farmId == farmId
+           and contract.fillTypeIndex == fillType
+           and contract:getDestStation() == station then
+
+            local consumed, isComplete = contract:addDeliveredLiters(remaining)
+            if consumed > 0 then
+                remaining = remaining - consumed
+                if isComplete then
+                    self:_completeContract(contract)
+                else
+                    TransportCompanyContractEvent.sendEvent(
+                        TransportCompanyContractEvent.TYPE_UPDATE, contract
+                    )
+                end
+            end
+        end
+    end
+end
+
+---Pay out a finished contract. This is the single completion path:
+---both the player tipping the last liters at the destination and a
+---hired driver's AI job finishing land here, and contract:complete()
+---returns false on the second caller, so a contract can never pay
+---twice.
+function TransportCompanyManager:_completeContract(contract)
+    if not contract:complete() then return end
+
+    local truck = self.trucks[contract.acceptedTruckUniqueId]
+
+    -- addMoney rejects farmId 0 outright ("Can't change money of
+    -- spectator farm", FSBaseMission.lua:2006).
+    local farmId = contract.farmId
+    if (farmId == nil or farmId <= 0) and truck ~= nil then
+        farmId = truck.farmId
+    end
+    if farmId == nil or farmId <= 0 then
+        TransportCompanyLog.warning(
+            "Contract %s completed with no owning farm — no payout",
+            tostring(contract.contractId)
+        )
+        return
+    end
+
+    -- A hired driver keeps a share as a wage; the company banks the
+    -- rest. Both hit the same farm balance, so they are booked as two
+    -- entries under different money types to keep the base game
+    -- finance screen readable.
+    local driverCut = 0
+    if contract.isHiredDriver then
+        local rewardShare = self.settings:get("hiredDriverRewardShare") or 20
+        driverCut = math.floor(contract.reward * rewardShare / 100)
+    end
+    local companyRevenue = contract.reward - driverCut
+
+    self:_addMoney(companyRevenue, farmId, MoneyType.MISSIONS)
+    if driverCut > 0 then
+        self:_addMoney(-driverCut, farmId, MoneyType.AI)
+    end
+
+    -- Company books always move, whether or not a truck was assigned.
+    self.ledger.revenue = self.ledger.revenue + companyRevenue
+    self.ledger.driverWages = self.ledger.driverWages + driverCut
+    self.ledger.jobs = self.ledger.jobs + 1
+
+    if truck ~= nil then
+        truck:addRevenue(companyRevenue)
+        truck:addJob()
+        TransportCompanyMoneyEvent.sendEvent(
+            TransportCompanyMoneyEvent.TYPE_CONTRACT_REWARD,
+            companyRevenue, farmId, contract.contractId, truck.uniqueId
+        )
+        if driverCut > 0 then
+            truck:addExpense(driverCut)
+            TransportCompanyMoneyEvent.sendEvent(
+                TransportCompanyMoneyEvent.TYPE_HIRED_DRIVER_CUT,
+                driverCut, farmId, contract.contractId, truck.uniqueId
+            )
+        end
+    end
+
+    TransportCompanyContractEvent.sendEvent(
+        TransportCompanyContractEvent.TYPE_STATE_CHANGE, contract,
+        TransportCompanyContract.STATE_COMPLETED
+    )
+    self:_notify(string.format(
+        g_i18n:getText("transportCompany_contractDelivered"),
+        contract:getLocalizedFillType(),
+        g_i18n:formatMoney(companyRevenue, 0, true, true)
+    ))
+
+    TransportCompanyLog.info(
+        "Contract %s completed: reward=%d driverCut=%d company=%d",
+        contract.contractId, contract.reward, driverCut, companyRevenue
+    )
+
+    -- Free the board slot so a fresh job appears.
+    self:_regenerateContractBoard()
+end
+
+---Show a base-game side notification, when the player wants them.
+---Needs a local HUD, which a dedicated server does not have — there
+---the call is simply skipped.
+function TransportCompanyManager:_notify(text)
+    if not self.settings:get("showNotifications") then return end
+    if g_currentMission == nil or g_currentMission.hud == nil then return end
+    g_currentMission:addIngameNotification(FSBaseMission.INGAME_NOTIFICATION_OK, text)
+end
+
 -- ── AI Job Completion (Hired Driver) ────────────
 
 ---Called when an AI job stops. If the job was a hired-driver
@@ -662,75 +977,22 @@ function TransportCompanyManager:_onAIServerJobStopped(job, aiMessage)
     end
 end
 
----Complete a hired-driver contract: calculate reward, pay
----the company, pay the driver their share, and broadcast
----the result.
+---Complete a hired-driver contract.
+---
+---Delivery detection usually gets there first: the AI tips the load at
+---the destination, which credits the contract through the same station
+---hook a player would trigger. This is the backstop for the case where
+---the job reports success without a crediting tip, and it delegates to
+---the one completion path so the driver's cut is applied identically.
 ---@param contract TransportCompanyContract
 ---@param job table The completed AI job
 function TransportCompanyManager:_completeHiredDriverContract(contract, job)
-    if not contract:complete() then return end
-
-    local truck = self.trucks[contract.acceptedTruckUniqueId]
-
-    -- Resolve the farm to pay. addMoney rejects farmId 0 outright
-    -- ("Can't change money of spectator farm", FSBaseMission.lua:2006),
-    -- so a contract with no owning farm must not reach it.
-    local farmId = contract.farmId
-    if (farmId == nil or farmId <= 0) and truck ~= nil then
-        farmId = truck.farmId
-    end
-    if farmId == nil or farmId <= 0 then
-        TransportCompanyLog.warning(
-            "Contract %s completed with no owning farm — no payout",
-            tostring(contract.contractId)
-        )
-        return
-    end
-
-    -- The driver keeps hiredDriverRewardShare % as a wage; the rest is
-    -- company revenue. Both land on the same farm balance, so they are
-    -- booked as two entries under different money types to keep the
-    -- base game finance screen honest.
-    local rewardShare = self.settings:get("hiredDriverRewardShare") or 20
-    local driverCut = math.floor(contract.reward * rewardShare / 100)
-    local companyRevenue = contract.reward - driverCut
-
-    self:_addMoney(companyRevenue, farmId, MoneyType.MISSIONS)
-    if driverCut > 0 then
-        self:_addMoney(-driverCut, farmId, MoneyType.AI)
-    end
-
-    -- Per-truck books
-    if truck ~= nil then
-        truck:addRevenue(companyRevenue)
-        truck:addJob()
-        TransportCompanyMoneyEvent.sendEvent(
-            TransportCompanyMoneyEvent.TYPE_CONTRACT_REWARD,
-            companyRevenue, farmId, contract.contractId, truck.uniqueId
-        )
-        if driverCut > 0 then
-            truck:addExpense(driverCut)
-            TransportCompanyMoneyEvent.sendEvent(
-                TransportCompanyMoneyEvent.TYPE_HIRED_DRIVER_CUT,
-                driverCut, farmId, contract.contractId, truck.uniqueId
-            )
-        end
-    end
-
-    -- Broadcast completion to all clients
-    TransportCompanyContractEvent.sendEvent(
-        TransportCompanyContractEvent.TYPE_STATE_CHANGE, contract,
-        TransportCompanyContract.STATE_COMPLETED
-    )
-
-    TransportCompanyLog.info(
-        "Hired-driver contract %s completed: reward=%d, driverCut=%d, company=%d",
-        contract.contractId, contract.reward, driverCut, companyRevenue
-    )
+    self:_completeContract(contract)
 end
 
 ---Book money against a farm. Server-only (addMoney refuses to run on
----a client, FSBaseMission.lua:2021) and never with farmId 0.
+---a client, FSBaseMission.lua:2021) and never with farmId 0, which the
+---engine rejects as the spectator farm (FSBaseMission.lua:2006).
 ---@param amount number Positive credits, negative debits
 ---@param farmId number Must be > 0
 ---@param moneyType table A MoneyType constant

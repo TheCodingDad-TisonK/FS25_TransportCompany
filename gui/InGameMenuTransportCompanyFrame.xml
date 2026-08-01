@@ -15,7 +15,7 @@
 			<!-- Every ListItem needs a name: the cell database is keyed by
 			     it (SmoothListElement.lua:255) and getCellTypeForItemInSection
 			     returns that name to pick a row layout. -->
-			<SmoothList profile="fs25_subCategoryList" id="contentList" startClipperElementName="startClipper" endClipperElementName="endClipper" emptyIndicatorId="noContractsText">
+			<SmoothList profile="fs25_subCategoryList" id="contentList" onClick="onListSelectionChanged" startClipperElementName="startClipper" endClipperElementName="endClipper" emptyIndicatorId="noContractsText">
 				<ListItem profile="fs25_subCategoryListItem" name="contractItem">
 					<Text profile="fs25_subCategoryListItemName" name="type"/>
 					<Text profile="fs25_transportCompanyListItemTime" name="state"/>

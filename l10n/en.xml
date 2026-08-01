@@ -101,6 +101,9 @@
     <text name="transportCompany_acceptContract">
         <en>Accept contract</en>
     </text>
+    <text name="transportCompany_hireDriver">
+        <en>Hire driver</en>
+    </text>
     <text name="transportCompany_acceptContractHelp">
         <en>Accept this contract and assign a truck.</en>
     </text>
@@ -196,6 +199,9 @@
     </text>
     <text name="transportCompany_totalJobs">
         <en>Total jobs</en>
+    </text>
+    <text name="transportCompany_totalWages">
+        <en>Driver wages</en>
     </text>
     <text name="transportCompany_totalProfit">
         <en>Net profit</en>

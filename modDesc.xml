@@ -52,6 +52,7 @@ v1.0.0.0 - ModHub-ready release
         <sourceFile filename="scripts/transportCompany/TransportCompanyTruck.lua"/>
         <sourceFile filename="scripts/transportCompany/events/TransportCompanyContractEvent.lua"/>
         <sourceFile filename="scripts/transportCompany/events/TransportCompanyMoneyEvent.lua"/>
+        <sourceFile filename="scripts/transportCompany/events/TransportCompanyAcceptEvent.lua"/>
         <sourceFile filename="scripts/transportCompany/TransportCompanyManager.lua"/>
         <sourceFile filename="scripts/gui/InGameMenuTransportCompanyFrame.lua"/>
         <sourceFile filename="scripts/TransportCompany.lua"/>

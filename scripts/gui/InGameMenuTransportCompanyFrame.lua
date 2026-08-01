@@ -43,11 +43,11 @@ InGameMenuTransportCompanyFrame.TAB_NAMES = {
 function InGameMenuTransportCompanyFrame.new(target, custom_mt)
     local self = TabbedMenuFrameElement.new(target, custom_mt or InGameMenuTransportCompanyFrame_mt)
 
-    self.hasCustomMenuButtons = false
+    self.hasCustomMenuButtons = true
     self.currentTab = InGameMenuTransportCompanyFrame.TAB_DISPATCH
 
     -- Flattened rows for the current tab, rebuilt on every refresh.
-    -- Each row is { cellName = <ListItem name>, ... field values }.
+    -- Each row is { cellName = <ListItem name>, contract = ..., ... }.
     self.rows = {}
 
     return self
@@ -56,6 +56,21 @@ end
 function InGameMenuTransportCompanyFrame:initialize()
     self.backButtonInfo = {
         inputAction = InputAction.MENU_BACK
+    }
+
+    self.acceptButtonInfo = {
+        inputAction = InputAction.MENU_ACTIVATE,
+        text = g_i18n:getText("transportCompany_acceptContract"),
+        callback = function()
+            self:onButtonAccept()
+        end
+    }
+    self.hireButtonInfo = {
+        inputAction = InputAction.MENU_EXTRA_1,
+        text = g_i18n:getText("transportCompany_hireDriver"),
+        callback = function()
+            self:onButtonHire()
+        end
     }
 
     -- Sub-category selector (Dispatch / Fleet / Ledger tabs)
@@ -138,6 +153,64 @@ function InGameMenuTransportCompanyFrame:updateTabContent()
     if self.contentList ~= nil then
         self.contentList:reloadData()
     end
+    self:_updateMenuButtons()
+end
+
+---The contract under the cursor, or nil when the selection is not an
+---acceptable contract row.
+---@return TransportCompanyContract|nil
+function InGameMenuTransportCompanyFrame:getSelectedContract()
+    if self.contentList == nil then return nil end
+    -- SmoothListElement exposes selectedIndex as a field
+    -- (SmoothListElement.lua:38); there is no getSelectedIndex().
+    local row = self.rows[self.contentList.selectedIndex]
+    if row == nil then return nil end
+    return row.contract
+end
+
+---Show Accept / Hire only on the Dispatch tab, and only when the
+---highlighted contract is still available.
+function InGameMenuTransportCompanyFrame:_updateMenuButtons()
+    local buttons = { self.backButtonInfo }
+
+    local contract = self:getSelectedContract()
+    if contract ~= nil and contract.state == TransportCompanyContract.STATE_AVAILABLE then
+        table.insert(buttons, self.acceptButtonInfo)
+        table.insert(buttons, self.hireButtonInfo)
+    end
+
+    self:setMenuButtonInfo(buttons)
+end
+
+---Selection changed in the list — the buttons may need to appear or
+---disappear. Bound from the SmoothList's #onClick.
+function InGameMenuTransportCompanyFrame:onListSelectionChanged()
+    self:_updateMenuButtons()
+end
+
+function InGameMenuTransportCompanyFrame:onButtonAccept()
+    self:_requestAccept(TransportCompanyAcceptEvent.MODE_SELF)
+end
+
+function InGameMenuTransportCompanyFrame:onButtonHire()
+    self:_requestAccept(TransportCompanyAcceptEvent.MODE_HIRE)
+end
+
+---Ask the server to take the highlighted contract. The client never
+---mutates contract state itself; the board comes back via
+---TransportCompanyContractEvent.
+function InGameMenuTransportCompanyFrame:_requestAccept(mode)
+    local contract = self:getSelectedContract()
+    if contract == nil then return end
+
+    TransportCompanyAcceptEvent.sendEvent(
+        contract.contractId, mode, g_currentMission:getFarmId()
+    )
+
+    -- On a listen server the request was handled synchronously, so the
+    -- board is already up to date; on a client this simply redraws the
+    -- current state and the event refreshes it again on arrival.
+    self:updateTabContent()
 end
 
 ---Dispatch tab: open contracts with their status.
@@ -159,6 +232,7 @@ function InGameMenuTransportCompanyFrame:_buildDispatchRows(manager)
 
             table.insert(self.rows, {
                 cellName = "contractItem",
+                contract = contract,
                 type = string.format("%s - %s", typeText, contract:getLocalizedFillType()),
                 state = stateText,
                 progress = string.format(
@@ -188,15 +262,20 @@ function InGameMenuTransportCompanyFrame:_buildFleetRows(manager)
 end
 
 ---Ledger tab: company totals as label/value rows.
+---
+---Revenue, wages and job count come from the company ledger, not from
+---summing the fleet: a contract the player hauls personally cannot be
+---attributed to a truck, so the per-truck books would under-report it.
+---Fuel and distance are genuinely per-truck and are summed.
 function InGameMenuTransportCompanyFrame:_buildLedgerRows(manager)
-    local totalRevenue, totalFuel, totalDistance, totalJobs = 0, 0, 0, 0
-
+    local totalFuel, totalDistance = 0, 0
     for _, truck in pairs(manager.trucks) do
-        totalRevenue = totalRevenue + truck.revenue
         totalFuel = totalFuel + truck.fuelCost
         totalDistance = totalDistance + truck.distanceM
-        totalJobs = totalJobs + truck.jobsDelivered
     end
+
+    local ledger = manager.ledger
+    local profit = ledger.revenue - ledger.driverWages - totalFuel
 
     local function addRow(labelKey, value)
         table.insert(self.rows, {
@@ -206,11 +285,12 @@ function InGameMenuTransportCompanyFrame:_buildLedgerRows(manager)
         })
     end
 
-    addRow("transportCompany_totalRevenue", g_i18n:formatMoney(totalRevenue, 0, true, true))
+    addRow("transportCompany_totalRevenue", g_i18n:formatMoney(ledger.revenue, 0, true, true))
     addRow("transportCompany_totalFuel", g_i18n:formatMoney(totalFuel, 0, true, true))
+    addRow("transportCompany_totalWages", g_i18n:formatMoney(ledger.driverWages, 0, true, true))
     addRow("transportCompany_totalDistance", g_i18n:formatDistance(totalDistance, 1))
-    addRow("transportCompany_totalJobs", tostring(totalJobs))
-    addRow("transportCompany_totalProfit", g_i18n:formatMoney(totalRevenue - totalFuel, 0, true, true))
+    addRow("transportCompany_totalJobs", tostring(ledger.jobs))
+    addRow("transportCompany_totalProfit", g_i18n:formatMoney(profit, 0, true, true))
 end
 
 -- ── SmoothList data source ─────────────────────────────────
@@ -229,8 +309,10 @@ function InGameMenuTransportCompanyFrame:populateCellForItemInSection(list, sect
     if row == nil then
         return
     end
+    -- Only string fields map to cell text; cellName and the attached
+    -- contract reference are bookkeeping.
     for name, value in pairs(row) do
-        if name ~= "cellName" then
+        if type(value) == "string" then
             local element = cell:getAttribute(name)
             if element ~= nil then
                 element:setText(value)

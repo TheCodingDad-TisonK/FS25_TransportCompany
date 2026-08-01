@@ -48,6 +48,15 @@ TransportCompanyContract.DAY_LENGTH = 86400000
 TransportCompanyContract.REWARD_PER_LITER = 0.005
 TransportCompanyContract.REWARD_PER_OBJECT = 350
 
+-- Delivery is always measured in LITERS, because that is the only
+-- quantity the engine reports at a station
+-- (UnloadingStation:addFillLevelFromTool returns moved liters).
+-- A pallet contract expresses its amount in pallets, so it carries a
+-- conversion factor. 1000 L is the standard FS pallet capacity; the
+-- game's pallet XMLs live outside dataS and cannot be read here, so
+-- this is a deliberate fixed assumption rather than a lookup.
+TransportCompanyContract.LITERS_PER_PALLET = 1000
+
 ---@class TransportCompanyContract
 TransportCompanyContract_mt = Class(TransportCompanyContract)
 
@@ -57,8 +66,9 @@ function TransportCompanyContract.new()
     self.contractType = TransportCompanyContract.CONTRACT_TYPE_BULK
     self.state = TransportCompanyContract.STATE_AVAILABLE
     self.fillTypeIndex = nil
-    self.amount = 0              -- liters (BULK) or objects (PALLET)
-    self.delivered = 0           -- liters/objects already delivered
+    self.amount = 0              -- liters (BULK) or pallets (PALLET)
+    self.delivered = 0           -- same unit as amount
+    self.litersPerUnit = 1       -- 1 for BULK, LITERS_PER_PALLET for PALLET
     self.reward = 0              -- total reward on completion
     -- Source station reference: placeable uniqueId + station index
     -- (matches AIParameterLoadingStation persistence: owningPlaceable
@@ -98,6 +108,7 @@ function TransportCompanyContract:writeStream(streamId, connection)
     streamWriteFloat32(streamId, self.amount)
     streamWriteFloat32(streamId, self.delivered)
     streamWriteFloat32(streamId, self.reward)
+    streamWriteFloat32(streamId, self.litersPerUnit or 1)
     streamWriteString(streamId, self.sourceUniqueId or "")
     streamWriteInt16(streamId, self.sourceStationIndex or 0)
     streamWriteString(streamId, self.sourceName or "")
@@ -122,6 +133,7 @@ function TransportCompanyContract:readStream(streamId, connection)
     self.amount = streamReadFloat32(streamId)
     self.delivered = streamReadFloat32(streamId)
     self.reward = streamReadFloat32(streamId)
+    self.litersPerUnit = streamReadFloat32(streamId)
     self.sourceUniqueId = streamReadString(streamId)
     self.sourceStationIndex = streamReadInt16(streamId)
     self.sourceName = streamReadString(streamId)
@@ -145,6 +157,7 @@ function TransportCompanyContract:saveToXMLFile(xmlFile, key)
     xmlFile:setFloat(key .. "#amount", self.amount)
     xmlFile:setFloat(key .. "#delivered", self.delivered)
     xmlFile:setFloat(key .. "#reward", self.reward)
+    xmlFile:setFloat(key .. "#litersPerUnit", self.litersPerUnit or 1)
     xmlFile:setString(key .. "#sourceUniqueId", self.sourceUniqueId or "")
     xmlFile:setInt(key .. "#sourceStationIndex", self.sourceStationIndex or 0)
     xmlFile:setString(key .. "#sourceName", self.sourceName or "")
@@ -169,6 +182,7 @@ function TransportCompanyContract:loadFromXMLFile(xmlFile, key)
     self.amount = xmlFile:getFloat(key .. "#amount", 0)
     self.delivered = xmlFile:getFloat(key .. "#delivered", 0)
     self.reward = xmlFile:getFloat(key .. "#reward", 0)
+    self.litersPerUnit = xmlFile:getFloat(key .. "#litersPerUnit", 1)
     self.sourceUniqueId = xmlFile:getString(key .. "#sourceUniqueId")
     self.sourceStationIndex = xmlFile:getInt(key .. "#sourceStationIndex", 1)
     self.sourceName = xmlFile:getString(key .. "#sourceName", "")
@@ -320,7 +334,7 @@ function TransportCompanyContract:expire()
     return true
 end
 
---- Add delivered amount (liters/objects). Returns true when this
+--- Add delivered amount in contract units. Returns true when this
 --- delivery pushed the contract to completion.
 function TransportCompanyContract:addDelivered(delta)
     if delta <= 0 or self:getIsComplete() then
@@ -332,6 +346,32 @@ function TransportCompanyContract:addDelivered(delta)
         return true
     end
     return false
+end
+
+--- How many more LITERS this contract still needs.
+function TransportCompanyContract:getRemainingLiters()
+    local remainingUnits = self.amount - self.delivered
+    if remainingUnits <= 0 then
+        return 0
+    end
+    return remainingUnits * (self.litersPerUnit or 1)
+end
+
+--- Credit a delivery measured in liters (what a station reports).
+--- Only consumes what the contract still needs, so the surplus of an
+--- over-large tipper can roll on to another open contract.
+---@param liters number Liters just unloaded at the destination
+---@return number consumedLiters, boolean isNowComplete
+function TransportCompanyContract:addDeliveredLiters(liters)
+    if liters == nil or liters <= 0 or self:getIsComplete() then
+        return 0, false
+    end
+    local consumed = math.min(liters, self:getRemainingLiters())
+    if consumed <= 0 then
+        return 0, false
+    end
+    local isComplete = self:addDelivered(consumed / (self.litersPerUnit or 1))
+    return consumed, isComplete
 end
 
 --- Reward to pay out on completion (hired driver share is applied
@@ -446,14 +486,16 @@ function TransportCompanyContract.generate(deadlineDays)
     end
 
     if contract.contractType == TransportCompanyContract.CONTRACT_TYPE_PALLET then
-        -- Pallet contract: deliver counted objects (e.g. palletized
-        -- goods). REWARD_PER_OBJECT mirrors TransportMission.
+        -- Pallet contract: counted in pallets, delivered in liters.
+        -- REWARD_PER_OBJECT mirrors TransportMission.
         local amount = math.random(4, 12)
         contract.amount = amount
+        contract.litersPerUnit = TransportCompanyContract.LITERS_PER_PALLET
         contract.reward = amount * TransportCompanyContract.REWARD_PER_OBJECT
     else
         local amount = math.random(8000, 24000)
         contract.amount = amount
+        contract.litersPerUnit = 1
         contract.reward = math.floor(amount * pricePerLiter * 0.15)
     end
 

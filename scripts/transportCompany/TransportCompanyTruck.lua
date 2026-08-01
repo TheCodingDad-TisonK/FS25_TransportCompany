@@ -41,6 +41,7 @@ function TransportCompanyTruck.new(vehicle)
     self.farmId = vehicle:getOwnerFarmId()
     self.revenue = 0                               -- money earned on contracts
     self.fuelCost = 0                              -- cost of fuel burned (economy price)
+    self.otherCost = 0                             -- driver wages and other charges
     self.distanceM = 0                             -- meters driven while enrolled
     self.jobsDelivered = 0                         -- contracts completed with this truck
     self.isEnrolled = false
@@ -58,6 +59,7 @@ function TransportCompanyTruck:saveToXMLFile(xmlFile, key)
     xmlFile:setInt(key .. "#farmId", self.farmId or 0)
     xmlFile:setFloat(key .. "#revenue", self.revenue)
     xmlFile:setFloat(key .. "#fuelCost", self.fuelCost)
+    xmlFile:setFloat(key .. "#otherCost", self.otherCost or 0)
     xmlFile:setFloat(key .. "#distanceM", self.distanceM)
     xmlFile:setInt(key .. "#jobsDelivered", self.jobsDelivered)
     xmlFile:setBool(key .. "#isEnrolled", self.isEnrolled)
@@ -70,6 +72,7 @@ function TransportCompanyTruck.loadFromXMLFile(xmlFile, key)
     self.farmId = xmlFile:getInt(key .. "#farmId", 0)
     self.revenue = xmlFile:getFloat(key .. "#revenue", 0)
     self.fuelCost = xmlFile:getFloat(key .. "#fuelCost", 0)
+    self.otherCost = xmlFile:getFloat(key .. "#otherCost", 0)
     self.distanceM = xmlFile:getFloat(key .. "#distanceM", 0)
     self.jobsDelivered = xmlFile:getInt(key .. "#jobsDelivered", 0)
     self.isEnrolled = xmlFile:getBool(key .. "#isEnrolled", true)
@@ -81,7 +84,7 @@ end
 -- ── Runtime helpers ────────────────────────────────────────
 
 function TransportCompanyTruck:getProfit()
-    return self.revenue - self.fuelCost
+    return self.revenue - self.fuelCost - (self.otherCost or 0)
 end
 
 --- Credit contract revenue to this truck's books.
@@ -89,10 +92,12 @@ function TransportCompanyTruck:addRevenue(amount)
     self.revenue = self.revenue + (amount or 0)
 end
 
---- Charge an expense (fuel, driver cut) to this truck's books.
---- Amounts are stored positive; getProfit subtracts them.
+--- Charge a non-fuel expense (driver wages) to this truck's books.
+--- Kept separate from fuelCost so the Fleet tab does not report a
+--- driver's wage as diesel burned. Amounts are stored positive;
+--- getProfit subtracts them.
 function TransportCompanyTruck:addExpense(amount)
-    self.fuelCost = self.fuelCost + math.abs(amount or 0)
+    self.otherCost = (self.otherCost or 0) + math.abs(amount or 0)
 end
 
 --- Count one completed delivery.
