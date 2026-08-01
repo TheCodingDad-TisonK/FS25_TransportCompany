@@ -782,10 +782,15 @@ end
 ---@return TransportCompanyTruck|nil
 function TransportCompanyManager:_findTruckForContract(contract, farmId)
     local probe = g_currentMission.aiJobTypeManager:createJob(AIJobType.LOAD_AND_DELIVER)
-    if probe == nil then return nil end
+    if probe == nil then
+        TransportCompanyLog.info("hire: could not create a LOAD_AND_DELIVER probe job")
+        return nil
+    end
 
+    local considered = 0
     for _, truck in pairs(self.trucks) do
         if truck.farmId == farmId then
+            considered = considered + 1
             local vehicle = truck:getVehicle()
             -- getIsAvailableForVehicle is the engine's own suitability
             -- test (AIJobLoadAndDeliver.lua:376): AI-capable, not in
@@ -794,9 +799,70 @@ function TransportCompanyManager:_findTruckForContract(contract, farmId)
                and probe:getIsAvailableForVehicle(vehicle) then
                 return truck
             end
+            self:_logHireRejection(truck, vehicle)
         end
     end
+
+    TransportCompanyLog.info(
+        "hire: no usable truck on farm %s (%d considered, %d enrolled)",
+        tostring(farmId), considered, self:_countTrucks()
+    )
     return nil
+end
+
+function TransportCompanyManager:_countTrucks()
+    local n = 0
+    for _ in pairs(self.trucks) do n = n + 1 end
+    return n
+end
+
+---Explain why a truck the player can plainly see was not usable.
+---
+---getIsAvailableForVehicle only returns a bare false, which is
+---indistinguishable from "you own no trucks". Re-checking each gate
+---here turns a confusing refusal into an actionable log line.
+function TransportCompanyManager:_logHireRejection(truck, vehicle)
+    local name = truck.vehicleName or truck.uniqueId or "?"
+
+    if vehicle == nil then
+        TransportCompanyLog.info("hire: '%s' rejected — vehicle not found in the world", name)
+        return
+    end
+
+    local function has(fn) return vehicle[fn] ~= nil end
+    local spec = vehicle.spec_aiJobVehicle
+
+    local canStart = has("getCanStartAIVehicle") and vehicle:getCanStartAIVehicle() or false
+    local dischargeNodes, fillUnits = 0, 0
+    if vehicle.getChildVehicles ~= nil then
+        for _, child in ipairs(vehicle:getChildVehicles()) do
+            if child.getAIDischargeNodes ~= nil then
+                for _ in pairs(child:getAIDischargeNodes()) do
+                    dischargeNodes = dischargeNodes + 1
+                end
+            end
+            if child.getAIFillUnits ~= nil then
+                for _ in pairs(child:getAIFillUnits()) do
+                    fillUnits = fillUnits + 1
+                end
+            end
+        end
+    end
+
+    TransportCompanyLog.info(
+        "hire: '%s' rejected — createAgent=%s setAITarget=%s canStartAI=%s "
+        .. "supportsAIJobs=%s aiStartAllowed=%s dirNode=%s aiActive=%s broken=%s "
+        .. "jobSupported=%s dischargeNodes=%d aiFillUnits=%d",
+        name,
+        tostring(has("createAgent")), tostring(has("setAITarget")), tostring(canStart),
+        tostring(spec ~= nil and spec.supportsAIJobs),
+        tostring(spec ~= nil and spec.isAIStartAllowed),
+        tostring(has("getAIDirectionNode") and vehicle:getAIDirectionNode() ~= nil),
+        tostring(has("getIsAIActive") and vehicle:getIsAIActive()),
+        tostring(vehicle.isBroken),
+        tostring(has("getIsAIJobSupported") and vehicle:getIsAIJobSupported("AIJobLoadAndDeliver")),
+        dischargeNodes, fillUnits
+    )
 end
 
 ---Build and start an AIJobLoadAndDeliver for a contract.

@@ -1,5 +1,15 @@
 <?xml version="1.0" encoding="utf-8" standalone="no" ?>
 <GUI name="ingameMenuTransportCompany">
+	<!--
+	  Two-panel layout, matching dataS/gui/InGameMenuContractsFrame.xml.
+
+	  fs25_subCategoryContainer is only 410px wide, so the left list can
+	  hold a title line plus two short values and nothing more. An
+	  earlier version put five columns at 100/470/700/840px in here;
+	  everything past 410px fell outside the panel, which is what made
+	  the page look collapsed. Details belong in the content container
+	  on the right.
+	-->
 	<ThreePartBitmap profile="fs25_subCategoryContainerBg">
 		<Bitmap profile="fs25_subCategoryContainerArrow"/>
 	</ThreePartBitmap>
@@ -16,27 +26,18 @@
 			     it (SmoothListElement.lua:255) and getCellTypeForItemInSection
 			     returns that name to pick a row layout. -->
 			<SmoothList profile="fs25_subCategoryList" id="contentList" onClick="onListSelectionChanged" startClipperElementName="startClipper" endClipperElementName="endClipper" emptyIndicatorId="noContractsText">
-				<!-- Dispatch: title line, then route / progress / reward / state -->
-				<ListItem profile="fs25_subCategoryListItem" name="contractItem">
-					<Text profile="fs25_subCategoryListItemName" name="type"/>
-					<Text profile="fs25_tcCol1" name="route"/>
-					<Text profile="fs25_tcCol2" name="progress"/>
-					<Text profile="fs25_tcCol4" name="reward"/>
-					<Text profile="fs25_tcRight" name="state"/>
-				</ListItem>
-				<!-- Fleet: truck name, then distance / fuel / jobs / profit -->
-				<ListItem profile="fs25_subCategoryListItem" name="fleetItem">
-					<Text profile="fs25_subCategoryListItemName" name="name"/>
-					<Text profile="fs25_tcCol1" name="distance"/>
-					<Text profile="fs25_tcCol2" name="fuel"/>
-					<Text profile="fs25_tcCol3" name="jobs"/>
-					<Text profile="fs25_tcCol4" name="profit"/>
-					<Text profile="fs25_tcRight" name="revenue"/>
-				</ListItem>
-				<!-- Ledger: label on the left, value on the right -->
-				<ListItem profile="fs25_subCategoryListItem" name="ledgerItem">
-					<Text profile="fs25_subCategoryListItemName" name="label"/>
-					<Text profile="fs25_tcRight" name="value"/>
+				<!--
+				  ONE row layout for all three sub-tabs, deliberately.
+				  With a cell type per tab, switching tabs made the list
+				  swap cell types against a selection index left over
+				  from the previous tab, which is why switching worked
+				  only sometimes. A single layout removes the mismatch
+				  entirely; the three tabs just fill the same slots.
+				-->
+				<ListItem profile="fs25_subCategoryListItem" name="row">
+					<Text profile="fs25_tcListPrimary" name="primary"/>
+					<Text profile="fs25_tcListLeft" name="left"/>
+					<Text profile="fs25_tcListRight" name="right"/>
 				</ListItem>
 			</SmoothList>
 			<ThreePartBitmap profile="fs25_subCategoryListSliderBox">
@@ -49,40 +50,135 @@
 	     (SmoothListElement.lua:238), so the element it names has to
 	     exist somewhere in this GUI or the indicator is never shown. -->
 	<GuiElement profile="fs25_menuContentContainer">
-		<Text profile="fs25_transportCompanyEmptyText" id="noContractsText" text="$l10n_transportCompany_noHq"/>
+		<Text profile="fs25_tcEmptyText" id="noContractsText" text="$l10n_transportCompany_noHq"/>
 	</GuiElement>
 
-	<!-- fs25_contractsListItemTime / fs25_contractsListItemReward are
-	     declared locally inside dataS/gui/InGameMenuContractsFrame.xml,
-	     not in dataS/guiProfiles.xml — they are not global and cannot be
-	     referenced from here. These are local equivalents, laid out as
-	     four columns plus a right-aligned slot. -->
+	<!-- Detail panel for whatever is selected on the left. -->
+	<GuiElement profile="fs25_menuContentContainer" id="contentContainer">
+		<GuiElement profile="fs25_tcDetailBox" id="detailBox">
+			<Text profile="fs25_tcDetailTitle" id="detailTitle"/>
+			<Text profile="fs25_tcDetailSubtitle" id="detailSubtitle"/>
+			<SmoothList profile="fs25_tcDetailList" id="detailList">
+				<ListItem profile="fs25_tcDetailItem" name="detailItem">
+					<Text profile="fs25_tcDetailLabel" name="label"/>
+					<Text profile="fs25_tcDetailValue" name="value"/>
+				</ListItem>
+			</SmoothList>
+			<Text profile="fs25_tcProgressLabel" id="progressLabel"/>
+			<ThreePartBitmap profile="fs25_tcProgressBg" id="progressBarBg">
+				<ThreePartBitmap profile="fs25_tcProgressBar" id="progressBar"/>
+			</ThreePartBitmap>
+			<Text profile="fs25_tcRewardValue" id="rewardText"/>
+		</GuiElement>
+	</GuiElement>
+
 	<GUIProfiles>
-		<Profile name="fs25_tcCol1" extends="fs25_textDarkHighlight" with="anchorBottomLeft">
-			<position value="100px 30px"/>
+		<!-- left list rows: must stay inside 410px -->
+		<!--
+		  The row is inside fs25_subCategoryContainer, which is 410px
+		  wide. Content starts at 100px and the right slot sits 38px in
+		  from the edge, so roughly 270px is usable. Anything wider than
+		  that is what was clamping the text.
+		-->
+		<Profile name="fs25_tcListPrimary" extends="fs25_textDarkHighlight" with="anchorTopLeft">
+			<size value="268px 32px"/>
+			<position value="100px -18px"/>
 			<textSize value="24px"/>
+		</Profile>
+		<Profile name="fs25_tcListLeft" extends="fs25_textDarkHighlight" with="anchorBottomLeft">
+			<size value="150px 28px"/>
+			<position value="100px 26px"/>
+			<textSize value="22px"/>
 			<textVerticalAlignment value="bottom"/>
-			<textColor value="$preset_fs25_colorMainLight"/>
-		</Profile>
-		<Profile name="fs25_tcCol2" extends="fs25_tcCol1">
-			<position value="470px 30px"/>
-		</Profile>
-		<Profile name="fs25_tcCol3" extends="fs25_tcCol1">
-			<position value="700px 30px"/>
-		</Profile>
-		<Profile name="fs25_tcCol4" extends="fs25_tcCol1">
-			<position value="840px 30px"/>
-			<textSize value="26px"/>
 			<textColor value="$preset_fs25_colorMainHighlight"/>
 			<textFocusedColor value="$preset_fs25_colorMainLight"/>
 			<textHighlightedColor value="$preset_fs25_colorMainHighlight"/>
 		</Profile>
-		<Profile name="fs25_tcRight" extends="fs25_textDarkHighlight" with="anchorBottomRight">
-			<position value="-38px 30px"/>
-			<textSize value="24px"/>
+		<Profile name="fs25_tcListRight" extends="fs25_textDarkHighlight" with="anchorBottomRight">
+			<size value="150px 28px"/>
+			<position value="-38px 26px"/>
+			<textSize value="22px"/>
 			<textAlignment value="right"/>
 		</Profile>
-		<Profile name="fs25_transportCompanyEmptyText" extends="fs25_textDefault" with="anchorMiddleCenter">
+
+		<!-- right detail panel -->
+		<Profile name="fs25_tcDetailBox" extends="emptyPanel" with="anchorTopLeft">
+			<size value="760px 820px"/>
+			<position value="500px 0px"/>
+		</Profile>
+		<Profile name="fs25_tcDetailTitle" extends="fs25_textDefault" with="anchorTopStretchingX">
+			<size value="100% 44px"/>
+			<position value="0px -20px"/>
+			<textSize value="32px"/>
+			<textBold value="true"/>
+			<textUpperCase value="true"/>
+			<textAlignment value="center"/>
+			<textColor value="$preset_fs25_colorMainHighlight"/>
+		</Profile>
+		<Profile name="fs25_tcDetailSubtitle" extends="fs25_textGrey" with="anchorTopStretchingX">
+			<size value="100% 32px"/>
+			<position value="0px -66px"/>
+			<textSize value="24px"/>
+			<textAlignment value="center"/>
+		</Profile>
+		<Profile name="fs25_tcDetailList" extends="emptyPanel" with="anchorTopCenter">
+			<size value="100% 400px"/>
+			<absoluteSizeOffset value="40px 0px"/>
+			<position value="0px -120px"/>
+			<handleFocus value="false"/>
+		</Profile>
+		<Profile name="fs25_tcDetailItem" extends="baseReference" with="anchorTopStretchingX alternating">
+			<height value="40px"/>
+			<imageColor value="$preset_fs25_colorGrey"/>
+			<alternateBackgroundColor value="$preset_fs25_colorGreyDark_50"/>
+		</Profile>
+		<Profile name="fs25_tcDetailLabel" extends="fs25_textDefault" with="anchorTopLeft">
+			<height value="40px"/>
+			<textOffset value="14px 0px"/>
+		</Profile>
+		<Profile name="fs25_tcDetailValue" extends="fs25_textDefault" with="anchorTopRight">
+			<height value="40px"/>
+			<textBold value="true"/>
+			<textAlignment value="right"/>
+			<textOffset value="-14px 0px"/>
+			<textColor value="$preset_fs25_colorMainHighlight"/>
+		</Profile>
+		<Profile name="fs25_tcProgressLabel" extends="fs25_textDefault" with="anchorTopCenter">
+			<size value="680px 30px"/>
+			<position value="0px -540px"/>
+			<textBold value="true"/>
+			<textUpperCase value="true"/>
+		</Profile>
+		<Profile name="fs25_tcProgressBg" extends="emptyPanel" with="anchorTopCenter">
+			<size value="680px 33px"/>
+			<position value="0px -578px"/>
+			<imageColor value="$preset_fs25_colorGrey"/>
+			<imageSliceId value="gui.contracts_progressbar_background_middle"/>
+			<startImageSize value="8px 0"/>
+			<startImageSliceId value="gui.contracts_progressbar_background_left"/>
+			<endImageSize value="8px 0"/>
+			<endImageSliceId value="gui.contracts_progressbar_background_right"/>
+		</Profile>
+		<Profile name="fs25_tcProgressBar" extends="baseReference" with="anchorMiddleLeft">
+			<size value="672px 25px"/>
+			<position value="4px 0px"/>
+			<imageColor value="$preset_fs25_colorMainHighlight"/>
+			<imageSliceId value="gui.button_middle"/>
+			<startImageSize value="6px 0"/>
+			<startImageSliceId value="gui.button_left"/>
+			<endImageSize value="6px 0"/>
+			<endImageSliceId value="gui.button_right"/>
+		</Profile>
+		<Profile name="fs25_tcRewardValue" extends="fs25_textDefault" with="anchorTopCenter">
+			<size value="500px 48px"/>
+			<position value="0px -636px"/>
+			<textSize value="34px"/>
+			<textBold value="true"/>
+			<textAlignment value="center"/>
+			<textColor value="$preset_fs25_colorMainHighlight"/>
+		</Profile>
+
+		<Profile name="fs25_tcEmptyText" extends="fs25_textDefault" with="anchorMiddleCenter">
 			<size value="560px 120px"/>
 			<position value="0px 57px"/>
 			<textSize value="26px"/>
