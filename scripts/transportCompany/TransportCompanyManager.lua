@@ -23,6 +23,21 @@ TransportCompanyManager.INSTANCE = nil
 TransportCompanyManager.MOD_NAME = "FS25_TransportCompany"
 TransportCompanyManager.MOD_DIRECTORY = nil
 
+-- ── Stuck-driver watchdog ──────────────────────
+-- The base game's own AI driving strategy already retries its route
+-- planning while blocked, but on busy town roads it can sit in that
+-- retry loop indefinitely (STATE: BLOCKED forever) without ever
+-- issuing an AIMessageErrorBlockedByObject that would let us react.
+-- Rather than wait on that, we watch the truck's own movement while
+-- its job is actively driving (AITaskDriveTo) and, if it covers next
+-- to nothing over a window, force-stop and re-issue the job. Starting
+-- a fresh AIJobLoadAndDeliver makes the engine recompute the route
+-- from the vehicle's current position, which is the same recovery a
+-- player gets from manually cancelling and re-hiring.
+TransportCompanyManager.STUCK_CHECK_INTERVAL_MS = 20000  -- evaluate every 20s
+TransportCompanyManager.STUCK_MIN_DISTANCE_M = 8         -- must cover at least this far
+TransportCompanyManager.STUCK_MAX_REPLAN_ATTEMPTS = 3    -- give up after this many forced replans
+
 -- ── Singleton ─────────────────────────────────
 
 ---@return TransportCompanyManager
@@ -55,6 +70,11 @@ function TransportCompanyManager.new(modDirectory, modName)
     -- vehicle that tipped them. Without this the Ledger would show no
     -- revenue for any contract the player hauled personally.
     self.ledger = { revenue = 0, driverWages = 0, jobs = 0 }
+
+    -- Per-contract watchdog state for hired drivers: contractId →
+    -- { windowTimer, windowDistance, attempts }. Server-only, never
+    -- persisted — a fresh save simply resumes watching from zero.
+    self.stuckWatch = {}
 
     -- Runtime state
     self.isMissionLoaded = false
@@ -251,6 +271,7 @@ function TransportCompanyManager:_onDeleteMission()
     self.contracts = {}
     self.hqPlaceables = {}
     self.trucks = {}
+    self.stuckWatch = {}
     self.isMissionStarted = false
     self.ledger = { revenue = 0, driverWages = 0, jobs = 0 }
     self.isMissionLoaded = false
@@ -730,6 +751,11 @@ function TransportCompanyManager:update(dt)
         self:_checkDeadlines()
     end
 
+    -- Watch hired drivers for a job that is driving but not actually
+    -- covering ground (blocked in traffic, stuck on an object, etc.)
+    -- and force a route replan when it has gone nowhere for too long.
+    self:_checkStuckDrivers(dt)
+
     -- Top the board up every 30s. Generation can legitimately fail
     -- (a station demolished, no route for a fill type), and without a
     -- retry the board would stay short until the next HQ change.
@@ -1083,6 +1109,146 @@ function TransportCompanyManager:_dispatchHiredDriver(contract, truck)
     return result == true, reason
 end
 
+-- ── Stuck-driver watchdog ───────────────────────
+
+---Check every active hired-driver contract for a truck that is
+---nominally driving but not making progress, and force a fresh route
+---plan when it has been stuck too long.
+---
+---Measures net displacement (straight-line distance between the start
+---and end of a window), not cumulative distance travelled. A truck
+---wedged against an obstacle often revs and rocks back and forth
+---trying to free itself — that can add up to several metres of actual
+---wheel movement over a window while its position barely changes, and
+---summing lastMovedDistance let that jitter reset the timer every
+---cycle, so the watchdog never fired.
+---@param dt number Delta time in milliseconds
+function TransportCompanyManager:_checkStuckDrivers(dt)
+    for contractId, contract in pairs(self.contracts) do
+        local isActiveHiredDriver = contract.isHiredDriver
+            and contract.state == TransportCompanyContract.STATE_ACCEPTED
+            and contract.hiredDriverJobId ~= nil
+            and contract.hiredDriverJobId > 0
+
+        if not isActiveHiredDriver then
+            self.stuckWatch[contractId] = nil
+        else
+            local job = g_currentMission.aiSystem:getJobById(contract.hiredDriverJobId)
+            local truck = self.trucks[contract.acceptedTruckUniqueId]
+            local vehicle = truck ~= nil and truck:getVehicle() or nil
+
+            if job == nil or vehicle == nil or vehicle.rootNode == nil then
+                -- Job already gone (caught by _onAIServerJobStopped) or
+                -- truck no longer resolvable — nothing to watch.
+                self.stuckWatch[contractId] = nil
+            else
+                -- Only count time while the job is actually trying to
+                -- drive somewhere. Loading/unloading/waiting tasks are
+                -- legitimately stationary and must not trip the watchdog.
+                local currentTask = job:getTaskByIndex(job.currentTaskIndex)
+                local isDriving = currentTask ~= nil and currentTask.isa ~= nil
+                    and currentTask:isa(AITaskDriveTo)
+
+                local watch = self.stuckWatch[contractId]
+                if watch == nil then
+                    watch = { windowTimer = 0, anchorX = nil, anchorZ = nil, attempts = 0 }
+                    self.stuckWatch[contractId] = watch
+                end
+
+                if isDriving then
+                    local x, _, z = getWorldTranslation(vehicle.rootNode)
+
+                    if watch.anchorX == nil then
+                        -- First tick of a fresh window: drop the anchor.
+                        watch.anchorX, watch.anchorZ = x, z
+                        watch.windowTimer = 0
+                    else
+                        watch.windowTimer = watch.windowTimer + dt
+
+                        if watch.windowTimer >= TransportCompanyManager.STUCK_CHECK_INTERVAL_MS then
+                            local dx, dz = x - watch.anchorX, z - watch.anchorZ
+                            local netDistance = math.sqrt(dx * dx + dz * dz)
+
+                            if netDistance < TransportCompanyManager.STUCK_MIN_DISTANCE_M then
+                                watch.attempts = watch.attempts + 1
+                                self:_replanStuckDriver(contract, truck, watch.attempts)
+                            else
+                                watch.attempts = 0
+                            end
+
+                            -- New window either way, anchored from here.
+                            watch.anchorX, watch.anchorZ = x, z
+                            watch.windowTimer = 0
+                        end
+                    end
+                else
+                    -- Not currently a driving task: don't accumulate,
+                    -- but don't wipe attempts either — a truck that
+                    -- gets stuck again shortly after loading shouldn't
+                    -- get a full fresh set of retries. Clear the anchor
+                    -- so driving resumes with a clean window.
+                    watch.windowTimer = 0
+                    watch.anchorX, watch.anchorZ = nil, nil
+                end
+            end
+        end
+    end
+end
+
+---Force-stop a hired driver's current job and immediately re-dispatch
+---a fresh one, which makes the engine recompute the route from the
+---vehicle's current position instead of waiting on a jam that may
+---never clear on its own.
+---@param contract TransportCompanyContract
+---@param truck TransportCompanyTruck|nil
+---@param attempt number How many times this contract has been replanned
+function TransportCompanyManager:_replanStuckDriver(contract, truck, attempt)
+    TransportCompanyLog.info(
+        "Hired driver for contract %s looks stuck (attempt %d) — forcing a route replan",
+        tostring(contract.contractId), attempt
+    )
+
+    if contract.hiredDriverJobId ~= nil and contract.hiredDriverJobId > 0 then
+        -- Publishing AI_JOB_STOPPED runs _onAIServerJobStopped
+        -- synchronously before stopJobById returns. Without this guard
+        -- its generic release logic would flip isHiredDriver off right
+        -- before _dispatchHiredDriver below turns around and starts a
+        -- fresh job for the same contract.
+        self._suppressReleaseForContractId = contract.contractId
+        g_currentMission.aiSystem:stopJobById(
+            contract.hiredDriverJobId, AIMessageErrorBlockedByObject.new()
+        )
+        self._suppressReleaseForContractId = nil
+        contract.hiredDriverJobId = 0
+    end
+
+    if attempt > TransportCompanyManager.STUCK_MAX_REPLAN_ATTEMPTS then
+        TransportCompanyLog.info(
+            "Contract %s exceeded max replan attempts — releasing the driver",
+            tostring(contract.contractId)
+        )
+        contract.isHiredDriver = false
+        self.stuckWatch[contract.contractId] = nil
+        TransportCompanyContractEvent.sendEvent(
+            TransportCompanyContractEvent.TYPE_UPDATE, contract
+        )
+        self:_notify(string.format(
+            g_i18n:getText("transportCompany_driverStuck"),
+            (truck ~= nil and truck.vehicleName) or "", contract:getLocalizedFillType()
+        ))
+        self:_refreshDispatchUI()
+        return
+    end
+
+    local started, reason = self:_dispatchHiredDriver(contract, truck)
+    if not started then
+        TransportCompanyLog.info(
+            "Replan dispatch failed for contract %s: %s",
+            tostring(contract.contractId), tostring(reason)
+        )
+    end
+end
+
 -- ── Delivery detection ─────────────────────────
 
 ---Install the delivery hooks. A station reports goods arriving
@@ -1250,23 +1416,50 @@ end
 
 -- ── AI Job Completion (Hired Driver) ────────────
 
----Called when an AI job stops. If the job was a hired-driver
----delivery for one of our contracts, mark the contract as
----completed and pay out.
+---Called when an AI job stops, for any reason. A clean delivery
+---(AIMessageSuccessFinishedJob) completes and pays out the contract.
+---Anything else — the player pressing H, running out of fuel, the
+---vehicle breaking down, being deleted, or our own watchdog forcing a
+---stop before it replans — ends the job without a delivery, and the
+---contract must not be left silently claiming a hired driver that no
+---longer exists. Releasing it here is what makes the Hire button
+---reappear for that contract.
 ---@param job table The AI job that stopped
----@param aiMessage table The stop message (AIMessageSuccessFinishedJob on success)
+---@param aiMessage table The stop message
 function TransportCompanyManager:_onAIServerJobStopped(job, aiMessage)
     if job == nil or aiMessage == nil then return end
 
-    -- Check if this is a successful delivery job
-    if not aiMessage.isa or not aiMessage:isa(AIMessageSuccessFinishedJob) then
+    if aiMessage.isa and aiMessage:isa(AIMessageSuccessFinishedJob) then
+        for _, contract in pairs(self.contracts) do
+            if contract.isHiredDriver and contract.hiredDriverJobId == job.jobId then
+                self:_completeHiredDriverContract(contract, job)
+                break
+            end
+        end
         return
     end
 
-    -- Find the contract that matches this job
     for _, contract in pairs(self.contracts) do
         if contract.isHiredDriver and contract.hiredDriverJobId == job.jobId then
-            self:_completeHiredDriverContract(contract, job)
+            if self._suppressReleaseForContractId == contract.contractId then
+                -- The watchdog is stopping this exact job on purpose so
+                -- it can immediately start a fresh one for the same
+                -- contract; don't hand control back to the player out
+                -- from under that redispatch.
+                return
+            end
+
+            TransportCompanyLog.info(
+                "Hired driver job for contract %s ended without delivering — returning control",
+                tostring(contract.contractId)
+            )
+            contract.isHiredDriver = false
+            contract.hiredDriverJobId = 0
+            self.stuckWatch[contract.contractId] = nil
+            TransportCompanyContractEvent.sendEvent(
+                TransportCompanyContractEvent.TYPE_UPDATE, contract
+            )
+            self:_refreshDispatchUI()
             break
         end
     end
@@ -1331,6 +1524,19 @@ end
 ---@param eventType number (TYPE_ADD, TYPE_UPDATE, TYPE_STATE_CHANGE, TYPE_REMOVE)
 ---@param contract TransportCompanyContract|nil
 ---@param state number
+---Refresh the Transport Company PDA page if the player currently has
+---it open. Contract state changes driven by the server in the
+---background — a completed delivery, an expired deadline, or the
+---stuck-driver watchdog releasing a driver — mutate the contract
+---object directly but nothing else tells the open page to redraw its
+---footer buttons, so a just-cancelled driver's "Hire" button would
+---stay hidden until the player switched tabs or reopened the page.
+function TransportCompanyManager:_refreshDispatchUI()
+    if self.pdaFrame ~= nil and self.pdaFrame.isOpen then
+        self.pdaFrame:updateTabContent()
+    end
+end
+
 function TransportCompanyManager:onContractEvent(eventType, contract, state)
     if contract == nil then return end
 
@@ -1346,6 +1552,8 @@ function TransportCompanyManager:onContractEvent(eventType, contract, state)
     elseif eventType == TransportCompanyContractEvent.TYPE_REMOVE then
         self.contracts[contract.contractId] = nil
     end
+
+    self:_refreshDispatchUI()
 end
 
 ---Remove contracts that are completed/expired and older than

@@ -72,6 +72,7 @@
         <e k="transportCompany_noTruck" v="Kein geeigneter LKW für diesen Auftrag gefunden."/>
         <e k="transportCompany_truckNotAttached" v="Hänge einen Anhänger an deinen LKW, bevor du losfährst."/>
         <e k="transportCompany_driverDispatched" v="Fahrer eingeteilt: %s fährt %s."/>
+        <e k="transportCompany_driverStuck" v="%s fand keinen Weg mehr und wurde vom Auftrag (%s) abgezogen. Erneut beauftragen oder die Straße selbst freimachen."/>
         <e k="transportCompany_settingsContractDensity" v="Auftragsdichte"/>
         <e k="transportCompany_settingsRewardMultiplier" v="Vergütungsmultiplikator"/>
         <e k="transportCompany_settingsDeadlineMultiplier" v="Fristmultiplikator"/>
@@ -112,6 +113,9 @@
         <e k="transportCompany_hireNotAiFillType" v="Angestellte Fahrer können diese Ware an dieser Station nicht laden. Selbst fahren geht weiterhin."/>
         <e k="transportCompany_hireNoStation" v="Die Lade- oder Abladestelle dieses Auftrags gibt es nicht mehr."/>
         <e k="transportCompany_hireNoFarm" v="Dieser Auftrag gehört keinem Hof."/>
+        <e k="transportCompany_hireDestNotAi" v="Angestellte Fahrer können diese Ware am Ziel nicht abladen. Selbst fahren geht weiterhin."/>
+        <e k="transportCompany_hireDestFull" v="Am Ziel ist kein Platz mehr für diese Ware, ein angestellter Fahrer käme also an und hätte nichts zum Abkippen. Warte, bis wieder Platz ist, oder fahre selbst."/>
+        <e k="transportCompany_hireNoRoute" v="An einem Ende dieser Route gibt es keine Zufahrt, die ein Fahrer nutzen kann. Selbst fahren geht weiterhin."/>
         <e k="transportCompany_hireAvailable" v="Möglich"/>
         <e k="transportCompany_hireUnavailable" v="Nicht möglich"/>
         <e k="transportCompany_hireReason" v="Grund"/>

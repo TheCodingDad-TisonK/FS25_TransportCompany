@@ -72,6 +72,7 @@
         <e k="transportCompany_noTruck" v="No suitable truck found for this contract."/>
         <e k="transportCompany_truckNotAttached" v="Attach a trailer to your truck before dispatching."/>
         <e k="transportCompany_driverDispatched" v="Driver dispatched: %s is hauling %s."/>
+        <e k="transportCompany_driverStuck" v="%s could not find a way through and was recalled from the %s contract. Try dispatching again or clear the road yourself."/>
         <e k="transportCompany_settingsContractDensity" v="Contract density"/>
         <e k="transportCompany_settingsRewardMultiplier" v="Reward multiplier"/>
         <e k="transportCompany_settingsDeadlineMultiplier" v="Deadline multiplier"/>
@@ -112,6 +113,9 @@
         <e k="transportCompany_hireNotAiFillType" v="Hired drivers cannot load these goods at this station. You can still haul it yourself."/>
         <e k="transportCompany_hireNoStation" v="This contract's pickup or drop-off station no longer exists."/>
         <e k="transportCompany_hireNoFarm" v="No farm owns this contract."/>
+        <e k="transportCompany_hireDestNotAi" v="Hired drivers cannot unload these goods at the destination. You can still haul it yourself."/>
+        <e k="transportCompany_hireDestFull" v="The destination has no room left for these goods, so a hired driver would arrive with nowhere to tip. Wait for it to empty, or haul it yourself."/>
+        <e k="transportCompany_hireNoRoute" v="One end of this route has no approach a driver can use. You can still haul it yourself."/>
         <e k="transportCompany_hireAvailable" v="Available"/>
         <e k="transportCompany_hireUnavailable" v="Not possible"/>
         <e k="transportCompany_hireReason" v="Reason"/>
