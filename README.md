@@ -182,7 +182,7 @@ Want to contribute code? PRs are welcome on the `development` branch.
 
 ```
 py build.py --deploy      # build the zip and install it
-py tests/run.py           # 105 assertions (needs: pip install lupa)
+py tests/run.py           # 123 assertions (needs: pip install lupa)
 py tools/modhub_check.py  # audit the built zip for ModHub
 py tools/build_icons.py   # regenerate the artwork and icon.dds
 ```
@@ -197,7 +197,7 @@ This mod is licensed under **[CC BY-NC-ND 4.0](https://creativecommons.org/licen
 
 You may share it in its original form with attribution. You may not sell it, modify and redistribute it, or reupload it under a different name or authorship. Contributions via pull request are explicitly permitted and encouraged.
 
-**Author:** TisonK &nbsp;·&nbsp; **Version:** 1.0.0.0
+**Author:** TisonK &nbsp;·&nbsp; **Version:** 1.0.1.0
 
 © 2026 TisonK - See [LICENSE](LICENSE) for full terms.
 

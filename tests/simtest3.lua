@@ -40,7 +40,13 @@ mgr.isServer,mgr.isMissionLoaded=true,true
 mgr._regenerateContractBoard=function() end
 g_transportCompanyManager=mgr
 
-local DEST={name="dest"}
+-- A real UnloadingStation always exposes an AI drive target
+-- (getAITargetPositionAndDirection); it returns nil only when no trigger
+-- on the station supports AI. The mocks below model AI-capable stations.
+local DEST={
+    name="dest",
+    getAITargetPositionAndDirection = function() return 0, 0, 0, 0 end,
+}
 local function add(id)
   local c=C.new(); c.contractId=id; c.amount=1000; c.litersPerUnit=1; c.reward=500
   c.fillTypeIndex=FillType.WHEAT
@@ -91,16 +97,19 @@ local STATION_OK = {
     name = "ok",
     getIsFillTypeAISupported = function() return true end,
     getFillLevel = function(_, ft, farm) return farm == 1 and 9000 or 0 end,
+    getAITargetPositionAndDirection = function() return 0, 0, 0, 0 end,
 }
 local STATION_EMPTY = {
     name = "empty",
     getIsFillTypeAISupported = function() return true end,
     getFillLevel = function() return 0 end,
+    getAITargetPositionAndDirection = function() return 0, 0, 0, 0 end,
 }
 local STATION_NOAI = {
     name = "noai",
     getIsFillTypeAISupported = function() return false end,
     getFillLevel = function() return 9000 end,
+    getAITargetPositionAndDirection = function() return 0, 0, 0, 0 end,
 }
 
 local function jobWith(id, src)
@@ -140,6 +149,62 @@ ok(h1.state == C.STATE_ACCEPTED, "still accepted after a failed hire")
 ok(h1.isHiredDriver == false, "no phantom driver left behind")
 ok(mgr:onAcceptRequest("h1", TransportCompanyAcceptEvent.MODE_HIRE, 2) == false,
    "another farm cannot hire for it")
+
+print("\n-- books broadcast builds a full snapshot (server) --")
+local lastBooks = nil
+TransportCompanyBooksEvent = {
+    new = function() return {} end,
+    sendEvent = function(ev) lastBooks = ev end,
+}
+local bm = TransportCompanyManager.new("/mods/tc/", "FS25_TransportCompany")
+bm.isServer, bm.isMissionLoaded = true, true
+bm.ledger.revenue, bm.ledger.driverWages, bm.ledger.jobs = 500, 100, 4
+local bveh = { getUniqueId = function() return "v9" end,
+               getFullName = function() return "Volvo" end,
+               getOwnerFarmId = function() return 1 end }
+bm.trucks["v9"] = TransportCompanyTruck.new(bveh)
+bm.trucks["v9"].fuelCost, bm.trucks["v9"].distanceM = 12, 5000
+bm:_broadcastBooks()
+ok(lastBooks ~= nil and lastBooks.ledgerRevenue == 500 and lastBooks.ledgerJobs == 4,
+   "broadcast carries the ledger snapshot", lastBooks and lastBooks.ledgerRevenue)
+ok(lastBooks.trucks ~= nil and lastBooks.trucks[1].uniqueId == "v9"
+   and lastBooks.trucks[1].fuelCost == 12 and lastBooks.trucks[1].distanceM == 5000,
+   "broadcast carries every truck's books",
+   lastBooks ~= nil and lastBooks.trucks ~= nil and lastBooks.trucks[1] ~= nil
+   and lastBooks.trucks[1].fuelCost)
+
+print("\n-- client applies the books snapshot --")
+local cm = TransportCompanyManager.new("/mods/tc/", "FS25_TransportCompany")
+cm.isServer = false
+cm:onBooksEvent({
+    ledgerRevenue = 1234, ledgerDriverWages = 100, ledgerJobs = 3,
+    trucks = {
+        { uniqueId = "v1", vehicleName = "Scania", farmId = 1,
+          revenue = 900, fuelCost = 50, otherCost = 20, distanceM = 10000, jobsDelivered = 2 },
+    },
+})
+ok(cm.ledger.revenue == 1234 and cm.ledger.driverWages == 100 and cm.ledger.jobs == 3,
+   "client ledger synced from the snapshot", cm.ledger.revenue)
+local c1 = cm.trucks["v1"]
+ok(c1 ~= nil and c1.revenue == 900 and c1.fuelCost == 50 and c1.distanceM == 10000,
+   "client truck books synced", c1 ~= nil and c1.distanceM)
+ok(c1 ~= nil and c1:getProfit() == 830, "placeholder truck still has methods", c1 and c1:getProfit())
+
+print("\n-- company enabled mid-session resumes --")
+MessageType = { AI_JOB_STOPPED = 1 }
+g_messageCenter = { subscribe = function() end }
+local rm = TransportCompanyManager.new("/mods/tc/", "FS25_TransportCompany")
+rm.isServer = true
+rm.settings:set("enabled", false)
+local boardCalls = 0
+rm._regenerateContractBoard = function() boardCalls = boardCalls + 1 end
+rm:_onMissionStarted()
+ok(rm._startupRan == true, "mission setup runs even when the company starts disabled")
+ok(rm._aiSubscribed == true, "AI completion listener is subscribed from the start")
+ok(boardCalls == 0, "board is not filled while the company is disabled", boardCalls)
+rm.settings:set("enabled", true)
+rm:_regenerateContractBoard()
+ok(boardCalls == 1, "board fills when the company is turned on", boardCalls)
 
 print(string.format("\n%d passed, %d failed", pass, fail))
 return fail

@@ -54,6 +54,7 @@ TransportCompanyContractEvent = { TYPE_ADD=1, TYPE_UPDATE=2, TYPE_STATE_CHANGE=3
   sendEvent=function(t,c,s) table.insert(sent,{t=t,id=c and c.contractId,s=s}) end }
 TransportCompanyMoneyEvent = { TYPE_CONTRACT_REWARD=1, TYPE_HIRED_DRIVER_CUT=2,
   TYPE_TRUCK_REVENUE=3, TYPE_EXPENSE=4, sendEvent=function() end }
+TransportCompanyBooksEvent = { new=function() return {} end, sendEvent=function() end }
 
 local C = TransportCompanyContract
 local mgr = TransportCompanyManager.new("/mods/tc/", "FS25_TransportCompany")

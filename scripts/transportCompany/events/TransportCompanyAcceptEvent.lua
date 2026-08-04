@@ -73,5 +73,21 @@ function TransportCompanyAcceptEvent:run(connection)
     if g_transportCompanyManager == nil then
         return
     end
-    g_transportCompanyManager:onAcceptRequest(self.contractId, self.mode, self.farmId)
+
+    -- A client only ever acts for its own farm. The farmId in the
+    -- payload is treated as untrusted: it is replaced with the sender's
+    -- resolved farm, the same connection-to-farm lookup the base game
+    -- uses (userManager + farmManager, WashingStationEvent.lua:122-128).
+    local farmId = self.farmId
+    if g_currentMission ~= nil and g_currentMission.userManager ~= nil then
+        local userId = g_currentMission.userManager:getUserIdByConnection(connection)
+        if userId ~= nil then
+            local farm = g_farmManager:getFarmByUserId(userId)
+            if farm ~= nil then
+                farmId = farm.farmId
+            end
+        end
+    end
+
+    g_transportCompanyManager:onAcceptRequest(self.contractId, self.mode, farmId)
 end

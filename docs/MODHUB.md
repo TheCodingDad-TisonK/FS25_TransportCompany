@@ -34,7 +34,7 @@ Then run the **GIANTS TestRunner** on the same zip. It is the authority;
 |---|---|
 | **Mod name** | Transport Company |
 | **Zip filename** | `FS25_TransportCompany.zip` |
-| **Version** | 1.0.0.0 |
+| **Version** | 1.0.1.0 |
 | **Author** | TisonK |
 | **Platform** | PC / Mac |
 | **Category** | Gameplay / Placeables |
@@ -147,9 +147,17 @@ erfasst. Viele Fahrzeuge gelten als Traktor und erscheinen nicht.
 
 ---
 
-## 4. Changelog — v1.0.0.0
+## 4. Changelog
 
 ```
+v1.0.1.0
+- Hired drivers can now be stopped and reassigned from the dispatch office
+- A driver stuck in traffic or against an object is watched and its route is
+  replanned automatically up to three times before it is recalled
+- Jobs are only offered to hired drivers when both ends of the route really
+  support AI loading and unloading, so a dispatch no longer fails after the
+  driver is already rolling
+
 v1.0.0.0
 - Initial release
 - Freight contracts generated from the stations on your map

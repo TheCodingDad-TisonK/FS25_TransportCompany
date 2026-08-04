@@ -52,6 +52,7 @@ function InGameMenuTransportCompanyFrame.new(target, custom_mt)
     -- Each row is { cellName = <ListItem name>, contract = ..., ... }.
     self.rows = {}
     self.detailRows = {}
+    self.isOpen = false
 
     return self
 end
@@ -138,11 +139,13 @@ end
 
 function InGameMenuTransportCompanyFrame:onFrameOpen()
     InGameMenuTransportCompanyFrame:superClass().onFrameOpen(self)
+    self.isOpen = true
     self:updateTabContent()
 end
 
 function InGameMenuTransportCompanyFrame:onFrameClose()
     InGameMenuTransportCompanyFrame:superClass().onFrameClose(self)
+    self.isOpen = false
     self.rows = {}
     self.detailRows = {}
 end

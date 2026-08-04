@@ -328,6 +328,9 @@ function TransportCompanyContract:getIsAiHaulable(farmId)
         return false, "transportCompany_hireNoStation"
     end
 
+    local dest = self:getDestStation()
+
+    -- Source, mirroring AIParameterLoadingStation:validate
     if source.getIsFillTypeAISupported ~= nil
        and not source:getIsFillTypeAISupported(self.fillTypeIndex) then
         return false, "transportCompany_hireNotAiFillType"
@@ -338,7 +341,41 @@ function TransportCompanyContract:getIsAiHaulable(farmId)
         return false, "transportCompany_hireStationEmpty"
     end
 
+    -- Destination, mirroring AIParameterUnloadingStation:validate
+    -- (AIParameterUnloadingStation.lua:112-119). None of this was
+    -- checked before, which is why a job could pass every source test,
+    -- dispatch a driver, and then fail with the station full or the
+    -- target unreachable once the AI was already rolling.
+    if dest.getIsFillTypeAISupported ~= nil
+       and not dest:getIsFillTypeAISupported(self.fillTypeIndex) then
+        return false, "transportCompany_hireDestNotAi"
+    end
+
+    if dest.getFreeCapacity ~= nil
+       and (dest:getFreeCapacity(self.fillTypeIndex, farmId) or 0) <= 0 then
+        return false, "transportCompany_hireDestFull"
+    end
+
+    -- Both ends need somewhere the AI can actually drive to. A station
+    -- with no AI-capable trigger returns nil here, and the driver sets
+    -- off only to report the target unreachable.
+    if not TransportCompanyContract.getHasAiTarget(source, self.fillTypeIndex)
+       or not TransportCompanyContract.getHasAiTarget(dest, self.fillTypeIndex) then
+        return false, "transportCompany_hireNoRoute"
+    end
+
     return true, nil
+end
+
+---Does a station expose a position the AI can drive to?
+---LoadingStation and UnloadingStation both return nil when no trigger
+---supports AI (LoadingStation.lua:312, UnloadingStation.lua:312-325).
+function TransportCompanyContract.getHasAiTarget(station, fillTypeIndex)
+    if station == nil or station.getAITargetPositionAndDirection == nil then
+        return false
+    end
+    local ok, x = pcall(station.getAITargetPositionAndDirection, station, fillTypeIndex)
+    return ok and x ~= nil
 end
 
 -- ── Lifecycle transitions ──────────────────────────────────
@@ -434,11 +471,14 @@ function TransportCompanyContract:getCompletionReward()
 end
 
 --- Build the display unit suffix for the amount (liters / objects).
+--- The liter unit is shipped by the mod itself: the base-game key is not
+--- part of the mod's translation scope, so referencing it can surface as
+--- a missing-key string in the UI.
 function TransportCompanyContract:getAmountUnitText()
     if self.contractType == TransportCompanyContract.CONTRACT_TYPE_PALLET then
         return g_i18n:getText("transportCompany_unitObjects")
     end
-    return g_i18n:getText("unit_liter")
+    return g_i18n:getText("transportCompany_unitLiters")
 end
 
 -- ── Contract generator ─────────────────────────────────────
@@ -641,22 +681,47 @@ function TransportCompanyContract.generate(deadlineDays, farmId)
     -- Find a destination station that accepts this fill type.
     -- Same placeable-ownership requirement as the source, and never
     -- route a load back into the station it was collected from.
-    local destCandidates = {}
+    -- Split the destinations the same way as the sources. Picking an
+    -- AI-capable source and then pairing it with any old destination is
+    -- what let a job pass every check, dispatch a driver, and only then
+    -- fail with the station full or the target unreachable.
+    local destCandidates, aiDests = {}, {}
     for station, _ in pairs(storageSystem.unloadingStations) do
         if station ~= nil and station.owningPlaceable ~= nil
            and station.owningPlaceable ~= source.station.owningPlaceable
            and station:getIsFillTypeSupported(contract.fillTypeIndex) then
-            table.insert(destCandidates, {
+            local entry = {
                 ["station"] = station,
                 ["name"] = station:getName(),
-            })
+            }
+            table.insert(destCandidates, entry)
+
+            -- Exactly what AIParameterUnloadingStation:validate applies,
+            -- plus a target the driver can actually reach.
+            local aiOk =
+                (station.getIsFillTypeAISupported == nil
+                 or station:getIsFillTypeAISupported(contract.fillTypeIndex))
+                and (station.getFreeCapacity == nil
+                     or (station:getFreeCapacity(contract.fillTypeIndex, farmId) or 0) > 0)
+                and TransportCompanyContract.getHasAiTarget(station, contract.fillTypeIndex)
+            if aiOk then
+                table.insert(aiDests, entry)
+            end
         end
     end
     if #destCandidates == 0 then
         return nil
     end
 
-    local dest = destCandidates[math.random(1, #destCandidates)]
+    -- Only claim the job is AI-runnable if BOTH ends are.
+    local sourceIsAi = TransportCompanyContract.getHasAiTarget(
+        source.station, contract.fillTypeIndex)
+    local destPool = destCandidates
+    if sourceIsAi and #aiDests > 0 then
+        destPool = aiDests
+    end
+
+    local dest = destPool[math.random(1, #destPool)]
     contract.destName = dest.name or ""
     local destPlaceable = dest.station.owningPlaceable
     if destPlaceable ~= nil then
