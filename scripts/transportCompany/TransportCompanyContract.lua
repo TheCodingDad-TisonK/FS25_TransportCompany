@@ -471,11 +471,14 @@ function TransportCompanyContract:getCompletionReward()
 end
 
 --- Build the display unit suffix for the amount (liters / objects).
+--- The liter unit is shipped by the mod itself: the base-game key is not
+--- part of the mod's translation scope, so referencing it can surface as
+--- a missing-key string in the UI.
 function TransportCompanyContract:getAmountUnitText()
     if self.contractType == TransportCompanyContract.CONTRACT_TYPE_PALLET then
         return g_i18n:getText("transportCompany_unitObjects")
     end
-    return g_i18n:getText("unit_liter")
+    return g_i18n:getText("transportCompany_unitLiters")
 end
 
 -- ── Contract generator ─────────────────────────────────────

@@ -182,7 +182,7 @@ Want to contribute code? PRs are welcome on the `development` branch.
 
 ```
 py build.py --deploy      # build the zip and install it
-py tests/run.py           # 105 assertions (needs: pip install lupa)
+py tests/run.py           # 123 assertions (needs: pip install lupa)
 py tools/modhub_check.py  # audit the built zip for ModHub
 py tools/build_icons.py   # regenerate the artwork and icon.dds
 ```

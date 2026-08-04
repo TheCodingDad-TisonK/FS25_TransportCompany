@@ -82,6 +82,12 @@ function TransportCompanyManager.new(modDirectory, modName)
     self.isServer = false
     self.tickTimer = 0
     self.deadlineCheckTimer = 0
+    self.booksSyncTimer = 0
+
+    -- One-per-session flags (see _ensureMissionStartup). Reset on
+    -- mission teardown so a fresh career re-arms them.
+    self._startupRan = false
+    self._aiSubscribed = false
 
     return self
 end
@@ -220,32 +226,56 @@ end
 function TransportCompanyManager:_onMissionStarted()
     TransportCompanyLog.info("TransportCompanyManager: _onMissionStarted()")
 
-    if not self.settings:get("enabled") then
-        return
-    end
-
     -- The world exists by now, so stations, placeables and the fill
     -- levels inside their storages all resolve.
     self.isMissionStarted = true
-    self:_loadContracts()
-    self:_scanForHqs()
 
-    -- Build the fleet roster everywhere; only the server samples it.
-    self:_startTruckSampling()
+    -- One-per-session setup runs whether or not the company starts
+    -- enabled. Saved contracts, the HQ scan, truck enrollment and the
+    -- AI completion subscription are all inert while disabled (update()
+    -- gates sampling, board generation gates on enabled), and running
+    -- them here means switching the company on mid-session resumes
+    -- without a reload.
+    self:_ensureMissionStartup()
+
+    if not self.settings:get("enabled") then
+        TransportCompanyLog.info(
+            "TransportCompanyManager: company starts disabled - board fills when it is enabled")
+        return
+    end
 
     -- Fill the board if the save had none and an HQ is already standing.
     self:_regenerateContractBoard()
 
+    TransportCompanyLog.info("TransportCompanyManager: _onMissionStarted() complete")
+end
+
+---Run the one-per-session mission setup: load saved contracts, register
+---existing HQs, start truck sampling and subscribe to hired-driver job
+---completion. Called at mission start and never again for that mission
+---(the _startupRan flag). The setup used to sit inside the enabled gate,
+---so a company toggled on after starting disabled never enrolled trucks
+---and never detected a hired driver finishing - both resumed only on a
+---reload. Running it unconditionally keeps the enable path working.
+function TransportCompanyManager:_ensureMissionStartup()
+    if self._startupRan then return end
+    self._startupRan = true
+
+    self:_loadContracts()
+    self:_scanForHqs()
+    self:_startTruckSampling()
+
     -- Subscribe to AI job completion (hired-driver delivery).
     -- MessageCenter:subscribe returns nothing (MessageCenter.lua:27-49),
     -- so there is no handle to keep; teardown unsubscribes by target.
-    g_messageCenter:subscribe(
-        MessageType.AI_JOB_STOPPED,
-        TransportCompanyManager._onAIServerJobStopped,
-        self
-    )
-
-    TransportCompanyLog.info("TransportCompanyManager: _onMissionStarted() complete")
+    if not self._aiSubscribed then
+        g_messageCenter:subscribe(
+            MessageType.AI_JOB_STOPPED,
+            TransportCompanyManager._onAIServerJobStopped,
+            self
+        )
+        self._aiSubscribed = true
+    end
 end
 
 ---Tear down subscriptions and stop sampling. Reached via
@@ -275,6 +305,8 @@ function TransportCompanyManager:_onDeleteMission()
     self.isMissionStarted = false
     self.ledger = { revenue = 0, driverWages = 0, jobs = 0 }
     self.isMissionLoaded = false
+    self._startupRan = false
+    self._aiSubscribed = false
 end
 
 -- ── Settings ────────────────────────────────────
@@ -486,6 +518,13 @@ function TransportCompanyManager:_regenerateContractBoard()
     -- with jobs whose sources look bare. _onMissionStarted regenerates.
     if not self.isMissionStarted then
         TransportCompanyLog.debug("board: mission not started, deferring generation")
+        return
+    end
+    -- A disabled company generates nothing, including on HQ change while
+    -- it is switched off. The enable path calls this again, so the board
+    -- fills the moment the company is turned back on.
+    if not self.settings:get("enabled") then
+        TransportCompanyLog.debug("board: company disabled, nothing generated")
         return
     end
     if not self:_hasHq() then
@@ -763,6 +802,17 @@ function TransportCompanyManager:update(dt)
     if self.boardTimer >= 30000 then
         self.boardTimer = 0
         self:_regenerateContractBoard()
+    end
+
+    -- Keep client books current. Fuel and distance accumulate every
+    -- frame on the server, and there is no per-tick event for them, so
+    -- a snapshot is pushed periodically. Clients joining mid-game get
+    -- the current state within one interval instead of waiting for the
+    -- next payout.
+    self.booksSyncTimer = (self.booksSyncTimer or 0) + dt
+    if self.booksSyncTimer >= 30000 then
+        self.booksSyncTimer = 0
+        self:_broadcastBooks()
     end
 end
 
@@ -1386,6 +1436,11 @@ function TransportCompanyManager:_completeContract(contract)
         end
     end
 
+    -- Push the updated ledger and truck books to clients in one
+    -- authoritative snapshot (the money events above already nudge the
+    -- per-truck numbers; the snapshot keeps the company totals right).
+    self:_broadcastBooks()
+
     TransportCompanyContractEvent.sendEvent(
         TransportCompanyContractEvent.TYPE_STATE_CHANGE, contract,
         TransportCompanyContract.STATE_COMPLETED
@@ -1492,6 +1547,76 @@ function TransportCompanyManager:_addMoney(amount, farmId, moneyType)
 end
 
 -- ── Money Event Handling ──────────────────────
+
+---Build and broadcast a full snapshot of the company ledger and every
+---truck's books. Server only. Clients have no other source for fuel
+---and distance (both are sampled per-tick on the server and never sent
+---individually), and the ledger totals live only on the server, so
+---without this a client in multiplayer would show zero fuel, distance
+---and company revenue in the Fleet and Ledger tabs.
+---
+---Sent on every contract completion (authoritative right after a
+---payout) and periodically (see update()) so drifting figures and late
+---joins converge within one interval.
+function TransportCompanyManager:_broadcastBooks()
+    if not self.isServer then return end
+    if next(self.trucks) == nil and self.ledger.jobs == 0 then
+        return
+    end
+
+    local event = TransportCompanyBooksEvent.new()
+    event.ledgerRevenue = self.ledger.revenue
+    event.ledgerDriverWages = self.ledger.driverWages
+    event.ledgerJobs = self.ledger.jobs
+    event.trucks = {}
+    for uniqueId, truck in pairs(self.trucks) do
+        table.insert(event.trucks, {
+            uniqueId = uniqueId,
+            vehicleName = truck.vehicleName or "",
+            farmId = truck.farmId or 0,
+            revenue = truck.revenue or 0,
+            fuelCost = truck.fuelCost or 0,
+            otherCost = truck.otherCost or 0,
+            distanceM = truck.distanceM or 0,
+            jobsDelivered = truck.jobsDelivered or 0,
+        })
+    end
+    TransportCompanyBooksEvent.sendEvent(event)
+end
+
+---Apply a TransportCompanyBooksEvent snapshot (client side). Replaces
+---the company ledger and the listed trucks' books with the server's
+---authoritative values. A truck the client has not enrolled yet gets a
+---placeholder entry so the Fleet and Ledger tabs render immediately;
+---_enrollTrucks replaces it with the live vehicle on its next pass.
+function TransportCompanyManager:onBooksEvent(event)
+    if event == nil or self.isServer then return end
+
+    self.ledger.revenue = event.ledgerRevenue or 0
+    self.ledger.driverWages = event.ledgerDriverWages or 0
+    self.ledger.jobs = event.ledgerJobs or 0
+
+    for _, t in ipairs(event.trucks or {}) do
+        if t.uniqueId ~= nil and t.uniqueId ~= "" then
+            local truck = self.trucks[t.uniqueId]
+            if truck == nil then
+                truck = TransportCompanyTruck.new({
+                    getUniqueId = function() return t.uniqueId end,
+                    getFullName = function() return t.vehicleName or "Truck" end,
+                    getOwnerFarmId = function() return t.farmId or 0 end,
+                })
+                self.trucks[t.uniqueId] = truck
+            end
+            truck.revenue = t.revenue or 0
+            truck.fuelCost = t.fuelCost or 0
+            truck.otherCost = t.otherCost or 0
+            truck.distanceM = t.distanceM or 0
+            truck.jobsDelivered = t.jobsDelivered or 0
+        end
+    end
+
+    self:_refreshDispatchUI()
+end
 
 ---Called when a TransportCompanyMoneyEvent is received (client
 ---side). Updates the per-truck books and ledger display.
