@@ -51,7 +51,7 @@ Jobs come in three **priority tiers**:
 | ⏱ Urgent | Half the deadline | +50% |
 | 📦 Bulk | Up to 50% more volume | Tighter margin, more turnover |
 
-Every contract names its pickup, its drop-off, the amount, the reward and the deadline. Only routes whose source actually holds stock are offered, and the amount is **sized to your fleet** — a job never asks for more than a few loads of your biggest truck and trailer.
+Every contract names its pickup, its drop-off, the amount, the reward and the deadline. Only routes whose source your farm can actually **load from** are offered — the game only shows a loading prompt for stations your farm owns or has access to (your own silos and buildings, public buying points), and jobs are only generated from those. The amount is **sized to your fleet** — a job never asks for more than a few loads of your biggest truck and trailer.
 
 ### 🚛 Two Ways To Run A Job
 
@@ -192,12 +192,26 @@ Available with the developer console enabled.
 
 | Issue | Details |
 |---|---|
-| 🚚 **What counts as a truck** | Only vehicles the base game classes as trucks enrol in the fleet. Many vehicles are classed as tractors and will not appear. This is deliberate, not a fault. |
+| 🚛 **What counts as a truck** | Only vehicles the base game classes as trucks enrol in the fleet. Many vehicles are classed as tractors and will not appear. This is deliberate, not a fault. |
+| 🔒 **You can only load where your farm has access** | The board only offers contracts from stations your farm can actually load from — your own silos, buildings and productions, or public buying points. A map-owned silo you do not own or have access to never appears as a source, because the game would not show a loading prompt there. |
 | 🤖 **Hired drivers are fussier than you are** | The AI needs an AI-loadable fill type and stock your farm can actually draw, which is stricter than what you can haul by hand. When a job cannot be driven the mod says exactly why. |
 | 💰 **Selling stations pay twice** | If a contract's destination happens to be a selling point, you are paid for the goods and for the contract. Defensible — you were paid to haul someone's cargo — but worth knowing. |
 | 🌐 **Multiplayer** | Each farm that owns an HQ runs its own company — independent board, fleet, ledger and settings. Contracts, payouts and AI dispatch run on the server. Clients request changes and receive the result for their own company. |
 | 📦 **Pallet contracts** | Counted at 1000 L per pallet, the standard FS capacity. Unusual pallets may not line up exactly. |
 | 🚛 **Self-haul attribution** | A self-hauled delivery is credited to the truck that is physically discharging at the station. If the match cannot be made (a parked truck, an unusual setup), the job still completes and pays — it just is not pinned to a truck in the Fleet tab. |
+
+---
+
+## 🗺️ Roadmap
+
+What is planned or under consideration:
+
+- **Truck-brand contracts** — contracts that reflect the capabilities of the trucks you actually own, not just a generic board.
+- **More driver autonomy** — better route choices, refuelling and staging decisions for hired drivers.
+- **Regional pricing** — supply and demand shifts that follow what the farms around you actually grow and use.
+- **Company prestige** — reputation that unlocks higher-value contracts as your books stay clean.
+
+This list is not a promise. Issues and discussion decide what actually ships.
 
 ---
 
@@ -224,7 +238,7 @@ This mod is licensed under **[CC BY-NC-ND 4.0](https://creativecommons.org/licen
 
 You may share it in its original form with attribution. You may not sell it, modify and redistribute it, or reupload it under a different name or authorship. Contributions via pull request are explicitly permitted and encouraged.
 
-**Author:** TisonK &nbsp;·&nbsp; **Version:** 1.2.2.0
+**Author:** TisonK &nbsp;·&nbsp; **Version:** 1.2.3.0
 
 © 2026 TisonK - See [LICENSE](LICENSE) for full terms.
 

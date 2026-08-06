@@ -34,7 +34,7 @@ Then run the **GIANTS TestRunner** on the same zip. It is the authority;
 |---|---|
 | **Mod name** | Transport Company |
 | **Zip filename** | `FS25_TransportCompany.zip` |
-| **Version** | 1.2.2.0 |
+| **Version** | 1.2.3.0 |
 | **Author** | TisonK |
 | **Platform** | PC / Mac |
 | **Category** | Gameplay / Placeables |
@@ -164,6 +164,15 @@ erfasst. Viele Fahrzeuge gelten als Traktor und erscheinen nicht.
 ## 4. Changelog
 
 ```
+v1.2.3.0
+- Fix: contracts are now only offered from stations your farm can actually
+  load from. The game only shows a loading prompt at stations you own or
+  have access to, so a contract sourced from a map-owned silo you cannot
+  access could never be loaded ("no trigger to load when I arrive"). Sources
+  and destinations are now access-gated; buying points (seed, fertilizer,
+  lime) still always work
+- Existing saves carrying such unloadable contracts drop them on load
+
 v1.2.2.0
 - When a hired driver finishes a contract, the truck now drives itself back
   to park in front of your Transport Company HQ instead of being left at the

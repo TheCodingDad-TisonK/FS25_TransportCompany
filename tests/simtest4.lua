@@ -139,6 +139,8 @@ frame.detailBox   = { setVisible = function(s, v) s.visible = v end }
 frame.detailTitle, frame.detailSubtitle = text(), text()
 frame.progressLabel, frame.rewardText = text(), text()
 frame.rewardLabel = text()
+frame.detailSliderBox = { setVisible = function(s, v) s.visible = v end }
+frame.scrollHint      = { setVisible = function(s, v) s.visible = v end }
 frame.progressBarBg = { size = { 680, 33 }, setVisible = function() end }
 frame.progressBar   = { margin = { 4, 0 }, startSize = { 6, 0 },
                         setSize = function(s, w) s.w = w end }
@@ -189,6 +191,27 @@ for _, tab in ipairs({ 2, 3, 1 }) do
     ok(okTab, "switch to tab " .. tab, errTab)
 end
 ok(frame.currentTab == 1, "ends on dispatch")
+
+print("")
+print("-- scroll affordances only on scrollable tabs --")
+-- Settings, Drivers and Fleet never overflow, so their slider and hint
+-- must be hidden; Dispatch and Ledger may overflow and keep them.
+frame.currentTab = InGameMenuTransportCompanyFrame.TAB_DISPATCH
+frame:setTab(InGameMenuTransportCompanyFrame.TAB_DISPATCH)
+ok(frame.detailSliderBox.visible ~= false, "dispatch keeps the slider")
+ok(frame.scrollHint.visible ~= false, "dispatch keeps the hint")
+frame:setTab(InGameMenuTransportCompanyFrame.TAB_LEDGER)
+ok(frame.detailSliderBox.visible ~= false, "ledger keeps the slider")
+for _, tab in ipairs({ InGameMenuTransportCompanyFrame.TAB_SETTINGS,
+                       InGameMenuTransportCompanyFrame.TAB_DRIVERS,
+                       InGameMenuTransportCompanyFrame.TAB_FLEET }) do
+    frame:setTab(tab)
+    ok(frame.detailSliderBox.visible == false, "slider hidden on tab " .. tab,
+       tostring(frame.detailSliderBox.visible))
+    ok(frame.scrollHint.visible == false, "hint hidden on tab " .. tab,
+       tostring(frame.scrollHint.visible))
+end
+frame:setTab(InGameMenuTransportCompanyFrame.TAB_DISPATCH)
 
 print("")
 print("-- settings tab --")

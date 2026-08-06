@@ -1,8 +1,25 @@
+v1.2.3.0
+
+- Fix: contracts are now only offered from stations your farm can actually
+  load from. The game only shows a loading prompt at stations you own or
+  have access to, so a contract sourced from a map-owned silo you cannot
+  access could never be loaded ("no trigger to load when I arrive"). Sources
+  and destinations are now access-gated; buying points (seed, fertilizer,
+  lime) still always work
+- Existing saves carrying such unloadable contracts drop them on load
+
 v1.2.2.0
 
 - When a hired driver finishes a contract, the truck now drives itself back
-  to park in front of your Transport Company HQ instead of being left at the
+  to park near your Transport Company HQ instead of being left at the
   delivery point
+- New setting, Return truck to HQ (on by default): turn it off to leave
+  finished trucks where they ended
+- A Help button on every tab of the dispatch office opens a paged guide
+  covering how the company works, with a troubleshooting page explaining
+  what to do when a hired driver gets stuck (press H, reposition, re-hire)
+- Long setting descriptions no longer get cut off, and the help dialog's
+  line breaks render properly
 
 v1.2.1.0
 

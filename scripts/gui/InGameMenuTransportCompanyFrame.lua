@@ -647,6 +647,23 @@ function InGameMenuTransportCompanyFrame:_rebuildDetail()
     if self.detailList ~= nil then
         self.detailList:reloadData()
     end
+
+    -- Scroll affordances (slider + "Scroll for more") only make sense
+    -- on tabs whose detail panel can actually overflow: the Dispatch
+    -- contract detail and the Ledger summary/history. Settings, Drivers
+    -- and Fleet always fit, so both are hidden there to avoid implying
+    -- a clipped list that is not clipped.
+    local scrollTabs = {
+        [InGameMenuTransportCompanyFrame.TAB_DISPATCH] = true,
+        [InGameMenuTransportCompanyFrame.TAB_LEDGER] = true,
+    }
+    local wantsScroll = hasDetail and scrollTabs[self.currentTab] == true
+    if self.detailSliderBox ~= nil then
+        self.detailSliderBox:setVisible(wantsScroll)
+    end
+    if self.scrollHint ~= nil then
+        self.scrollHint:setVisible(wantsScroll and #self.detailRows > 6)
+    end
 end
 
 ---Append one label/value line to the detail panel.
