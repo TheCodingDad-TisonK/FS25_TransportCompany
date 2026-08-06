@@ -81,19 +81,37 @@ local f = C.new(); f:complete()
 ok(f:expire() == false, "completed contract cannot expire")
 
 print("")
-print("-- station stock is physical, not access-gated --")
+print("-- station stock is access-gated --")
 -- LoadingStation:getFillLevel filters every storage through
--- hasFarmAccessToStorage, so a map elevator reports 0 to the player and
--- everything reports 0 for farmId 0. Gating generation on it emptied
--- the board completely.
+-- hasFarmAccessToStorage (LoadingStation.lua:168-176), and the load
+-- prompt only appears when getIsFillAllowedToFarm(farmId) is true
+-- (LoadTrigger.lua:299). Counting physical stock regardless of access
+-- filled the board with contracts the player could not load ("no
+-- trigger to load when I arrive"), so getStationStock is access-aware.
 local storage = { getFillLevel = function(_, ft) return ft == FillType.WHEAT and 5000 or 0 end }
-local mapStation = { sourceStorages = { storage }, getFillLevel = function() return 0 end }
-ok(C.getStationStock(mapStation, FillType.WHEAT, 0) == 5000, "stock seen with farmId 0")
-ok(C.getStationStock(mapStation, FillType.WHEAT, 1) == 5000, "stock seen regardless of access")
+local mapStation = {
+  sourceStorages = { storage },
+  getFillLevel = function() return 0 end,
+  getIsFillAllowedToFarm = function() return false end,
+}
+ok(C.getStationStock(mapStation, FillType.WHEAT, 0) == 5000, "farmId 0 falls back to physical")
+ok(C.getStationStock(mapStation, FillType.WHEAT, 1) == 0,
+   "inaccessible source reports zero to a real farm")
 ok(C.getStationStock(mapStation, FillType.DIESEL, 1) == 0, "absent fill type reports zero")
 
+local ownedStation = {
+  sourceStorages = { storage },
+  getFillLevel = function() return 5000 end,
+  getIsFillAllowedToFarm = function() return true end,
+}
+ok(C.getStationStock(ownedStation, FillType.WHEAT, 1) == 5000,
+   "accessible source reports its stock")
+
+-- A station with no access gate method keeps the old physical fallback
+-- (BuyingStation and public map stations expose the gate; a bare object
+-- without one must not be zeroed out).
 local shop = { getFillLevel = function() return 777 end }
-ok(C.getStationStock(shop, FillType.WHEAT, 1) == 777, "no sourceStorages falls back")
+ok(C.getStationStock(shop, FillType.WHEAT, 1) == 777, "no access method falls back physical")
 ok(C.getStationStock(shop, FillType.WHEAT, 0) == 0, "fallback needs a real farm")
 
 -- The regression that emptied the board a second time: sourceStorages
@@ -109,12 +127,13 @@ ok(C.getStationStock(reallyEmpty, FillType.WHEAT, 1) == 0,
 
 -- A station can dispense goods with no storage behind it at all:
 -- basicFillTypes is declared in the station XML and never runs out.
--- Reading those as empty made a whole map look barren -- 26 stations,
--- 108 routes, every one reporting zero.
+-- These are the buying stations (seed/fertilizer/lime), which always
+-- allow access (BuyingStation:getIsFillAllowedToFarm returns true).
 local shopStation = {
   basicFillTypes = { [FillType.WHEAT] = true },
   sourceStorages = {},
   getFillLevel = function() return 0 end,
+  getIsFillAllowedToFarm = function() return true end,
 }
 ok(C.getStationStock(shopStation, FillType.WHEAT, 1) == C.UNLIMITED_STOCK,
    "basicFillTypes reports unlimited supply",

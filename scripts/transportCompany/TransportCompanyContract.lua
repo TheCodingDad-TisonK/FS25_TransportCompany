@@ -80,7 +80,7 @@ TransportCompanyContract.LITERS_PER_PALLET = 1000
 -- dropped on load rather than sitting on the board failing forever:
 -- before this existed, a save carried five jobs whose source stations
 -- could not supply them, and every hire attempt was refused.
-TransportCompanyContract.GENERATOR_VERSION = 3
+TransportCompanyContract.GENERATOR_VERSION = 4
 
 ---@class TransportCompanyContract
 TransportCompanyContract_mt = Class(TransportCompanyContract)
@@ -524,22 +524,47 @@ TransportCompanyContract.MIN_SOURCE_LITERS = 1000
 -- barren: 26 stations and 108 routes all reading zero.
 TransportCompanyContract.UNLIMITED_STOCK = 1000000
 
----How much of a fill type a station physically holds.
+---How much of a fill type a station lets THIS farm load.
 ---
----LoadingStation:getFillLevel gates every source storage on
----hasFarmAccessToStorage (LoadingStation.lua:110), so a map-owned
----elevator reports 0 to the player's farm and, with farmId 0, so does
----everything. Using it to decide whether a job exists meant no
----contracts were generated at all. Contract generation only cares
----whether the goods are physically there; access is the AI job's
----problem and validate() reports it properly at hire time.
+---A contract is only runnable if the farm can actually take goods from
+---the source. The load prompt (R) only appears when
+---LoadTrigger:getIsFillableObjectAvailable passes, which requires
+---source:getIsFillAllowedToFarm(farmId) (LoadTrigger.lua:299). For a
+---plain LoadingStation that is gated on hasFarmAccessToStorage /
+---accessHandler:canFarmAccess (LoadingStation.lua:239-252): the farm
+---must own the storage, or the storage must be public. Buying stations
+---(seed/fertilizer/lime shops) always allow (BuyingStation.lua:123).
+---
+---Earlier versions counted PHYSICAL stock by reading sourceStorage
+---fill levels directly, which filled the board with contracts from
+---stations the player could not load from ("no trigger to load when I
+---arrive"). Stock is now access-aware: an inaccessible source reports
+---zero and is never offered.
 ---@return number liters
 function TransportCompanyContract.getStationStock(station, fillTypeIndex, farmId)
+    -- A job is only runnable if the farm can actually load here. This is
+    -- the exact gate the LoadTrigger applies before showing the prompt.
+    if farmId ~= nil and farmId > 0 and station.getIsFillAllowedToFarm ~= nil then
+        if not station:getIsFillAllowedToFarm(farmId) then
+            return 0
+        end
+    end
+
     -- Infinite-supply goods first: no storage will ever back these.
+    -- Buying stations (which always allow access) are the shops selling
+    -- seed, fertilizer or lime.
     if station.basicFillTypes ~= nil and station.basicFillTypes[fillTypeIndex] then
         return TransportCompanyContract.UNLIMITED_STOCK
     end
 
+    -- Access-gated fill level: LoadingStation:getFillLevel already
+    -- filters every source storage through hasFarmAccessToStorage, so
+    -- this is exactly what the player could physically draw right now.
+    if station.getFillLevel ~= nil and farmId ~= nil and farmId > 0 then
+        return station:getFillLevel(fillTypeIndex, farmId) or 0
+    end
+
+    -- Fallback for farmId 0 / unowned diagnostic contexts: physical stock.
     local total = 0
     if station.sourceStorages ~= nil then
         for _, storage in pairs(station.sourceStorages) do
@@ -547,14 +572,6 @@ function TransportCompanyContract.getStationStock(station, fillTypeIndex, farmId
                 total = total + (storage:getFillLevel(fillTypeIndex) or 0)
             end
         end
-    end
-
-    -- sourceStorages can exist but be empty -- plenty of stations model
-    -- no storage at all. Returning 0 there reported every station on the
-    -- map as unstocked, so fall through to the access-aware query rather
-    -- than trusting an empty list.
-    if total <= 0 and station.getFillLevel ~= nil and farmId ~= nil and farmId > 0 then
-        total = station:getFillLevel(fillTypeIndex, farmId) or 0
     end
     return total
 end
@@ -624,13 +641,14 @@ function TransportCompanyContract.generate(deadlineDays, farmId)
     -- real stock are considered.
     -- Three pools, in descending order of how good the job will be:
     --   aiStations      a hired driver could run it right now
-    --   stockedStations the goods are physically there to load
+    --   stockedStations the farm can load it right now (access-gated)
     --   anyStations     the station handles this type at all
     --
-    -- Requiring stock outright produced an empty board on a normal map:
-    -- most loading points report no fill level, so nothing qualified.
-    -- Stock also fluctuates, and a silo the player fills later makes the
-    -- job perfectly runnable. Preference, not a requirement.
+    -- Stock is access-gated by getStationStock: a source the farm does
+    -- not have access to reports zero and is never offered. Without
+    -- that gate the board filled with contracts the player could not
+    -- load ("no trigger to load when I arrive"). Shops (basicFillTypes
+    -- / BuyingStation) count as unlimited and are always loadable.
     -- anyStations is kept for the diagnostic count only; it is never
     -- drawn from, for the reason given at the pool selection below.
     local aiStations, stockedStations, anyStations = {}, {}, {}
@@ -714,34 +732,46 @@ function TransportCompanyContract.generate(deadlineDays, farmId)
     -- AI-capable source and then pairing it with any old destination is
     -- what let a job pass every check, dispatch a driver, and only then
     -- fail with the station full or the target unreachable.
+    -- A destination the farm cannot access would silently reject the tip
+    -- (UnloadingStation:addFillLevelFromTool gates on
+    -- hasFarmAccessToStorage, UnloadingStation.lua:247), so destinations
+    -- are gated on getIsFillAllowedFromFarm just like the sources.
     local destCandidates, aiDests = {}, {}
     for station, _ in pairs(storageSystem.unloadingStations) do
         if station ~= nil and station.owningPlaceable ~= nil
            and station.owningPlaceable ~= source.station.owningPlaceable
            and station:getIsFillTypeSupported(contract.fillTypeIndex) then
-            -- Route distance drives the reward, so it is measured at
-            -- generation time (straight-line proxy, see RATE_PER_METER).
-            local distanceM = TransportCompanyContract.getRouteDistanceM(
-                source.station.owningPlaceable, station.owningPlaceable
-            )
-            if distanceM >= TransportCompanyContract.MIN_ROUTE_DISTANCE_M then
-                local entry = {
-                    ["station"] = station,
-                    ["name"] = station:getName(),
-                    ["distanceM"] = distanceM,
-                }
-                table.insert(destCandidates, entry)
+            -- The player must be able to tip here. Buying/selling points
+            -- always allow; a station whose storage the farm cannot reach
+            -- is skipped the same way the load side is.
+            if station.getIsFillAllowedFromFarm ~= nil and farmId ~= nil and farmId > 0
+               and not station:getIsFillAllowedFromFarm(farmId) then
+                -- inaccessible destination: skip
+            else
+                -- Route distance drives the reward, so it is measured at
+                -- generation time (straight-line proxy, see RATE_PER_METER).
+                local distanceM = TransportCompanyContract.getRouteDistanceM(
+                    source.station.owningPlaceable, station.owningPlaceable
+                )
+                if distanceM >= TransportCompanyContract.MIN_ROUTE_DISTANCE_M then
+                    local entry = {
+                        ["station"] = station,
+                        ["name"] = station:getName(),
+                        ["distanceM"] = distanceM,
+                    }
+                    table.insert(destCandidates, entry)
 
-                -- Exactly what AIParameterUnloadingStation:validate applies,
-                -- plus a target the driver can actually reach.
-                local aiOk =
-                    (station.getIsFillTypeAISupported == nil
-                     or station:getIsFillTypeAISupported(contract.fillTypeIndex))
-                    and (station.getFreeCapacity == nil
-                         or (station:getFreeCapacity(contract.fillTypeIndex, farmId) or 0) > 0)
-                    and TransportCompanyContract.getHasAiTarget(station, contract.fillTypeIndex)
-                if aiOk then
-                    table.insert(aiDests, entry)
+                    -- Exactly what AIParameterUnloadingStation:validate applies,
+                    -- plus a target the driver can actually reach.
+                    local aiOk =
+                        (station.getIsFillTypeAISupported == nil
+                         or station:getIsFillTypeAISupported(contract.fillTypeIndex))
+                        and (station.getFreeCapacity == nil
+                             or (station:getFreeCapacity(contract.fillTypeIndex, farmId) or 0) > 0)
+                        and TransportCompanyContract.getHasAiTarget(station, contract.fillTypeIndex)
+                    if aiOk then
+                        table.insert(aiDests, entry)
+                    end
                 end
             end
         end

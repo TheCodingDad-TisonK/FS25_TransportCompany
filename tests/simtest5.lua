@@ -70,11 +70,12 @@ local function makePlaceable(id, x, z)
     return p
 end
 
-local function makeLoadingStation(placeable, name, supported, stock, aiSupported)
+local function makeLoadingStation(placeable, name, supported, stock, aiSupported, allowAccess)
     local s = {
         name = name,
         owningPlaceable = placeable,
         sourceStorages = {},
+        allowAccess = allowAccess ~= false,   -- default: farm can load here
     }
     s.getSupportedFillTypes = function()
         local t = {}
@@ -87,7 +88,13 @@ local function makeLoadingStation(placeable, name, supported, stock, aiSupported
         for _, f in ipairs(aiSupported) do if f == ft then return true end end
         return false
     end
-    s.getFillLevel = function(_, ft, farm) return stock[ft] or 0 end
+    s.getFillLevel = function(_, ft, farm)
+        -- Mirrors LoadingStation:getFillLevel, which filters source
+        -- storages through hasFarmAccessToStorage.
+        if s.allowAccess then return stock[ft] or 0 end
+        return 0
+    end
+    s.getIsFillAllowedToFarm = function() return s.allowAccess end
     s.getAITargetPositionAndDirection = function() return 0, 0, 0, 0, {} end
     s.getName = function() return name end
     if loadingByPlaceable[placeable] == nil then loadingByPlaceable[placeable] = {} end
@@ -98,12 +105,13 @@ local function makeLoadingStation(placeable, name, supported, stock, aiSupported
     return s
 end
 
-local function makeUnloadingStation(placeable, name, supported, capacity)
+local function makeUnloadingStation(placeable, name, supported, capacity, allowAccess)
     local s = {
         name = name,
         owningPlaceable = placeable,
         supported = supported,
         capacity = capacity or 100000,
+        allowAccess = allowAccess ~= false,   -- default: farm can tip here
     }
     s.getSupportedFillTypes = function()
         local t = {}
@@ -118,7 +126,11 @@ local function makeUnloadingStation(placeable, name, supported, capacity)
         for _, f in ipairs(supported) do if f == ft then return true end end
         return false
     end
-    s.getFreeCapacity = function() return s.capacity end
+    s.getFreeCapacity = function(_, ft, farm)
+        if s.allowAccess then return s.capacity end
+        return 0
+    end
+    s.getIsFillAllowedFromFarm = function() return s.allowAccess end
     s.getAITargetPositionAndDirection = function() return 0, 0, 0, 0, {} end
     s.getName = function() return name end
     if unloadingByPlaceable[placeable] == nil then unloadingByPlaceable[placeable] = {} end
@@ -351,6 +363,45 @@ for i = 1, 40 do
 end
 ok(sizedOk, "bulk amount capped at 3 trips of the biggest rig")
 g_currentMission.vehicleSystem.vehicles = {}
+
+print("\n-- farm access gates the source --")
+-- A station the farm cannot access must report zero stock and never
+-- produce a contract, no matter how much it physically holds. This is
+-- the LoadTrigger:getIsFillableObjectAvailable gate (the R prompt only
+-- appears when getIsFillAllowedToFarm is true).
+g_currentMission.vehicleSystem.vehicles = {}
+local inaccessibleSource = makeLoadingStation(
+    makePlaceable("X1", 5000, 0), "Locked Silo", { FillType.WHEAT },
+    { [FillType.WHEAT] = 90000 }, nil, false)
+g_currentMission.storageSystem.loadingStations[inaccessibleSource] = true
+ok(C.getStationStock(inaccessibleSource, FillType.WHEAT, 1) == 0,
+   "inaccessible source reports zero stock")
+local accessSafe = true
+for i = 1, 40 do
+    local g = C.generate(7, 1)
+    if g ~= nil and g:getSourceStation() == inaccessibleSource then
+        accessSafe = false
+        print("  FAIL contract offered from an inaccessible source")
+    end
+end
+ok(accessSafe, "no contract from an inaccessible source")
+g_currentMission.storageSystem.loadingStations[inaccessibleSource] = nil
+
+print("\n-- farm access gates the destination --")
+-- A destination the farm cannot tip into must not be routed to.
+local inaccessibleDest = makeUnloadingStation(
+    makePlaceable("X2", 6000, 0), "Locked Dairy", { FillType.WHEAT }, 100000, false)
+g_currentMission.storageSystem.unloadingStations[inaccessibleDest] = true
+local destSafe = true
+for i = 1, 40 do
+    local g = C.generate(7, 1)
+    if g ~= nil and g:getDestStation() == inaccessibleDest then
+        destSafe = false
+        print("  FAIL contract routed to an inaccessible destination")
+    end
+end
+ok(destSafe, "no contract to an inaccessible destination")
+g_currentMission.storageSystem.unloadingStations[inaccessibleDest] = nil
 
 print(string.format("\n%d passed, %d failed", pass, fail))
 return fail
