@@ -34,7 +34,7 @@ Then run the **GIANTS TestRunner** on the same zip. It is the authority;
 |---|---|
 | **Mod name** | Transport Company |
 | **Zip filename** | `FS25_TransportCompany.zip` |
-| **Version** | 1.2.0.0 |
+| **Version** | 1.2.1.0 |
 | **Author** | TisonK |
 | **Platform** | PC / Mac |
 | **Category** | Gameplay / Placeables |
@@ -164,6 +164,15 @@ erfasst. Viele Fahrzeuge gelten als Traktor und erscheinen nicht.
 ## 4. Changelog
 
 ```
+v1.2.1.0
+- Fix: hiring a driver or upgrading the HQ no longer errors with
+  "attempt to call missing method 'getFarmMoney'" (the farm balance is
+  now read through the correct engine API)
+- Fix: a truck that already had odometer distance when it started being
+  tracked is no longer charged maintenance for miles driven before the
+  company enrolled it, and overdue services are billed once instead of
+  once per second
+
 v1.2.0.0
 - Complete overhaul. Freight dispatch is now a real business.
 - Per-farm companies: in multiplayer, every farm that owns an HQ runs its

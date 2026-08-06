@@ -868,6 +868,10 @@ function TransportCompanyManager:_loadCompanyFromFile(company, filePath)
         if uniqueId == nil or uniqueId == "" then break end
 
         local truck = TransportCompanyTruck.loadFromXMLFile(xmlFile, key)
+        -- A truck saved before the maintenance feature existed (or that
+        -- already had odometer distance) must not be serviced for miles
+        -- it drove before. Normalise the milestone at load.
+        truck:normalizeService()
         company.trucks[truck.uniqueId] = truck
         truckIdx = truckIdx + 1
     end
@@ -1280,7 +1284,7 @@ function TransportCompanyManager:_hireDriver(company, farmId)
     end
 
     local cost = TransportCompanyDriver.HIRE_COST
-    if g_currentMission ~= nil and g_currentMission:getFarmMoney(farmId) < cost then
+    if self:_getFarmMoney(farmId) < cost then
         self:_notify(g_i18n:getText("transportCompany_noMoney"), farmId)
         return false
     end
@@ -1329,7 +1333,7 @@ function TransportCompanyManager:_upgradeHq(company, farmId)
         self:_notify(g_i18n:getText("transportCompany_hqMaxLevel"), farmId)
         return false
     end
-    if g_currentMission ~= nil and g_currentMission:getFarmMoney(farmId) < cost then
+    if self:_getFarmMoney(farmId) < cost then
         self:_notify(g_i18n:getText("transportCompany_noMoney"), farmId)
         return false
     end
@@ -2154,6 +2158,22 @@ function TransportCompanyManager:_addMoney(amount, farmId, moneyType)
         return
     end
     g_currentMission:addMoney(amount, farmId, moneyType, true, true)
+end
+
+---Read a farm's current account balance. The base game exposes the
+---balance on the Farm object, not the mission (Farm:getBalance,
+---Farm.md:148-161); g_farmManager:getFarmById resolves the farm.
+---@param farmId number
+---@return number balance, 0 when the farm cannot be resolved
+function TransportCompanyManager:_getFarmMoney(farmId)
+    if farmId == nil or farmId <= 0 or g_farmManager == nil then
+        return 0
+    end
+    local farm = g_farmManager:getFarmById(farmId)
+    if farm == nil or farm.getBalance == nil then
+        return 0
+    end
+    return farm:getBalance() or 0
 end
 
 -- ── Money Event Handling ──────────────────────
