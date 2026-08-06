@@ -2228,7 +2228,7 @@ function TransportCompanyManager:_dispatchReturnToHq(company, contract)
         return
     end
 
-    local x, z, angle = self:_getHqParkingTarget(company.farmId)
+    local x, z = self:_getHqParkingTarget(company.farmId)
     if x == nil then
         TransportCompanyLog.debug(
             "return-to-HQ: no HQ for farm %s, truck stays put", tostring(company.farmId)
@@ -2240,9 +2240,18 @@ function TransportCompanyManager:_dispatchReturnToHq(company, contract)
         local job = g_currentMission.aiJobTypeManager:createJob(AIJobType.GOTO)
         if job == nil then return false end
 
+        -- The truck drives to the parking point and stops on its OWN
+        -- heading. A forced facing toward the building made the AI try
+        -- to achieve a final orientation it could not reach beside the
+        -- shed, which is exactly the "target unreachable" error seen in
+        -- game. This mirrors AIJobGoTo:applyCurrentState, which keeps
+        -- the vehicle's current direction when there is no prior target.
+        local dirX, _, dirZ = localDirectionToWorld(vehicle.rootNode, 0, 0, 1)
+        local heading = MathUtil.getYRotationFromDirection(dirX, dirZ)
+
         job.vehicleParameter:setVehicle(vehicle)
         job.positionAngleParameter:setPosition(x, z)
-        job.positionAngleParameter:setAngle(angle)
+        job.positionAngleParameter:setAngle(heading)
         job:setValues()
 
         local isValid, errorMessage = job:validate(company.farmId)
@@ -2283,9 +2292,9 @@ end
 ---small grid of offsets around the building (ahead, behind, each side,
 ---at a few distances) and returns the first one the AI confirms is
 ---reachable, so the GOTO job never reports "target unreachable" the way
----a single blind offset did. The facing angle points at the building.
+---a single blind offset did. The truck keeps its own heading on arrival.
 ---@param farmId number
----@return number|nil x, number|nil z, number|nil angle (yaw, radians)
+---@return number|nil x, number|nil z
 function TransportCompanyManager:_getHqParkingTarget(farmId)
     if g_currentMission == nil or g_currentMission.placeableSystem == nil then
         return nil
@@ -2316,9 +2325,7 @@ function TransportCompanyManager:_getHqParkingTarget(farmId)
                     local px = hx + axis[1] * distance
                     local pz = hz + axis[2] * distance
                     if g_currentMission.aiSystem:getIsPositionReachable(px, 0, pz) then
-                        -- Face the building so the truck parks at the door.
-                        local angle = MathUtil.getYRotationFromDirection(hx - px, hz - pz)
-                        return px, pz, angle
+                        return px, pz
                     end
                 end
             end
