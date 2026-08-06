@@ -43,6 +43,16 @@ g_fillTypeManager = {
     end,
 }
 
+-- Distance proxy the generator uses: straight-line between two owning
+-- placeables' root nodes (Node.md:9). Stubbed here from the same x/z
+-- coordinates the fake placeables carry.
+function calcDistanceFrom(nodeA, nodeB)
+    if nodeA == nil or nodeB == nil then return 0 end
+    local dx = (nodeA.x or 0) - (nodeB.x or 0)
+    local dz = (nodeA.z or 0) - (nodeB.z or 0)
+    return math.sqrt(dx * dx + dz * dz)
+end
+
 -- ── stub storage system ────────────────────────────────────────
 -- A station is a table with an owningPlaceable and the station APIs
 -- the generator reads. Station <-> index mapping is per placeable.
@@ -53,7 +63,7 @@ local unloadingByPlaceable = {}   -- placeable -> {station -> index}
 local unloadingIndexByPlaceable = {} -- placeable -> {index -> station}
 
 local function makePlaceable(id, x, z)
-    local p = { placeableId = id, x = x, z = z, rootNode = { id = id } }
+    local p = { placeableId = id, x = x, z = z, rootNode = { id = id, x = x, z = z } }
     p.getUniqueId = function() return "placeable_" .. id end
     p.getOwnerFarmId = function() return 1 end
     placeables[p.getUniqueId()] = p
@@ -171,6 +181,7 @@ g_currentMission = {
             return 0.05
         end,
     },
+    vehicleSystem = { vehicles = {} },
 }
 
 dofile(ROOT .. "/scripts/transportCompany/TransportCompanyContract.lua")
@@ -206,7 +217,13 @@ else
        string.format("amount=%d reward=%d", c.amount, c.reward))
     ok(c.state == C.STATE_AVAILABLE, "generated contracts are AVAILABLE")
     ok(c.generatorVersion == C.GENERATOR_VERSION, "generator version stamped")
-    ok(c.deadline == 1000000 + 86400000 * 7, "deadline = now + configured days", c.deadline)
+    -- Deadline: 7 days, or ~3.5 days for an urgent job (never below 1 day).
+    local days = (c.deadline - 1000000) / 86400000
+    if c.tier == C.CONTRACT_TIER_URGENT then
+        ok(days >= 3.4 and days <= 4.0, "urgent deadline is ~half", days)
+    else
+        ok(days >= 6.9 and days <= 7.1, "standard/bulk deadline is 7 days", days)
+    end
     ok(c.sourceUniqueId ~= nil and c.sourceUniqueId ~= "", "source uniqueId persisted")
     ok(c.sourceStationIndex ~= nil and c.sourceStationIndex > 0, "source index persisted", c.sourceStationIndex)
     ok(c.destUniqueId ~= nil and c.destUniqueId ~= "", "dest uniqueId persisted")
@@ -214,6 +231,7 @@ else
     ok(c:getSourceStation() ~= nil, "source resolves against the stub world")
     ok(c:getDestStation() ~= nil, "dest resolves against the stub world")
     ok(c:getSourceStation() ~= c:getDestStation(), "source and dest are distinct stations")
+    ok(c.routeDistanceM >= C.MIN_ROUTE_DISTANCE_M, "route exceeds min distance", c.routeDistanceM)
 
     -- Fill type matches the source's supported set.
     local src = c:getSourceStation()
@@ -221,6 +239,28 @@ else
     local srcSupports = src:getSupportedFillTypes()[ft] == true
     ok(srcSupports, "fill type is one the source supports")
 end
+
+print("\n-- reward math is distance- and price-driven --")
+-- Same goods, same price, longer route => strictly more reward.
+local shortR = C.computeBulkReward(12000, 0.6, 1000, C.CONTRACT_TIER_STANDARD)
+local longR  = C.computeBulkReward(12000, 0.6, 9000, C.CONTRACT_TIER_STANDARD)
+ok(longR > shortR, "bulk reward rises with distance", string.format("%d -> %d", shortR, longR))
+-- Same goods, same distance, higher price => more reward.
+local cheapR = C.computeBulkReward(12000, 0.2, 3000, C.CONTRACT_TIER_STANDARD)
+local dearR  = C.computeBulkReward(12000, 1.2, 3000, C.CONTRACT_TIER_STANDARD)
+ok(dearR > cheapR, "bulk reward rises with price", string.format("%d -> %d", cheapR, dearR))
+-- Urgent pays more than standard for the identical haul.
+local urgentR = C.computeBulkReward(12000, 0.6, 3000, C.CONTRACT_TIER_URGENT)
+ok(urgentR > shortR and urgentR > longR or urgentR > shortR, "urgent premium over standard",
+   string.format("standard=%d urgent=%d", shortR, urgentR))
+-- Pallet reward scales with the live price (gold > flour).
+local palletCheap = C.computePalletReward(6, 0.1, C.CONTRACT_TIER_STANDARD)
+local palletDear  = C.computePalletReward(6, 1.5, C.CONTRACT_TIER_STANDARD)
+ok(palletDear > palletCheap, "pallet reward scales with price",
+   string.format("%d -> %d", palletCheap, palletDear))
+-- A zero-distance contract still pays for the goods, never zero.
+local zero = C.computeBulkReward(12000, 0.6, 0, C.CONTRACT_TIER_STANDARD)
+ok(zero > 0, "reward positive even with no haul distance", zero)
 
 print("\n-- bulk contract math --")
 local bulkCount, palletCount = 0, 0
@@ -230,22 +270,19 @@ for i = 1, 60 do
         if g.contractType == C.CONTRACT_TYPE_BULK then
             bulkCount = bulkCount + 1
             local price = g_currentMission.economyManager:getPricePerLiter(g.fillTypeIndex)
-            -- reward = floor(amount * price * 0.15)
-            local expect = math.floor(g.amount * price * 0.15)
+            -- reward = computeBulkReward(amount, price, distance, tier)
+            local expect = C.computeBulkReward(g.amount, price, g.routeDistanceM, g.tier)
             if not approx(g.reward, expect) then
-                fail = fail + 1; print(string.format("  FAIL bulk reward %d != %d (amount=%d price=%s)",
-                    g.reward, expect, g.amount, tostring(price)))
-            end
-            if g.amount < 8000 or g.amount > 24000 then
-                fail = fail + 1; print("  FAIL bulk amount out of range " .. g.amount)
+                fail = fail + 1; print(string.format("  FAIL bulk reward %d != %d (amount=%d price=%s d=%d tier=%d)",
+                    g.reward, expect, g.amount, tostring(price), g.routeDistanceM, g.tier))
             end
             if g.litersPerUnit ~= 1 then
                 fail = fail + 1; print("  FAIL bulk litersPerUnit should be 1")
             end
         else
             palletCount = palletCount + 1
-            -- pallet reward = amount * 350
-            local expect = g.amount * C.REWARD_PER_OBJECT
+            local price = g_currentMission.economyManager:getPricePerLiter(g.fillTypeIndex)
+            local expect = C.computePalletReward(g.amount, price, g.tier)
             if not approx(g.reward, expect) then
                 fail = fail + 1; print(string.format("  FAIL pallet reward %d != %d", g.reward, expect))
             end
@@ -287,6 +324,33 @@ for i = 1, 30 do
     end
 end
 ok(capOk, "amount capped by available stock")
+
+print("\n-- capacity-aware sizing --")
+-- A farm whose biggest rig holds 14000 L must never get a bulk job
+-- needing more than 14000 * MAX_TRIPS_PER_JOB.
+local capVeh = {
+    spec_motorized = { statsType = "truck" },
+    getOwnerFarmId = function() return 1 end,
+    getIsBeingDeleted = function() return false end,
+    getAIFillUnits = function()
+        return { { capacity = 14000 } }
+    end,
+    getChildVehicles = function() return {} end,
+}
+g_currentMission.vehicleSystem.vehicles = { capVeh }
+local sizedOk = true
+for i = 1, 40 do
+    local g = C.generate(7, 1)
+    if g ~= nil and g.contractType == C.CONTRACT_TYPE_BULK then
+        local maxAsk = 14000 * C.MAX_TRIPS_PER_JOB
+        if g.amount > maxAsk then
+            sizedOk = false
+            print("  FAIL amount " .. g.amount .. " exceeds " .. maxAsk)
+        end
+    end
+end
+ok(sizedOk, "bulk amount capped at 3 trips of the biggest rig")
+g_currentMission.vehicleSystem.vehicles = {}
 
 print(string.format("\n%d passed, %d failed", pass, fail))
 return fail

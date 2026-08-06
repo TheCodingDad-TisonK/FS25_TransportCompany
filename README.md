@@ -36,14 +36,22 @@ Buy a headquarters and it does. Freight jobs are generated from the stations tha
 
 ### 📋 Contract Board
 
-Jobs are generated from real stations on your map, using the live economy price of the goods to set the reward.
+Jobs are generated from real stations on your map, priced against the live economy **and the route length** — a long haul pays more than a short one for the same goods.
 
 | | Type | Measured in | Notes |
-|---|---|---|---|
+|---|---|---|:---|
 | 🌾 | **Bulk freight** | Liters | Grain, roots, silage — anything a tipper carries |
-| 📦 | **Pallet freight** | Pallets | Palletisable goods, counted per pallet |
+| 📦 | **Pallet freight** | Pallets | Palletisable goods, priced against the live economy |
 
-Every contract names its pickup, its drop-off, the amount, the reward and the deadline. Only routes whose source actually holds stock are offered, so you never accept a job you cannot load.
+Jobs come in three **priority tiers**:
+
+| Tier | What it means | Pay |
+|---|---|---|
+| Standard | The usual job | Baseline |
+| ⏱ Urgent | Half the deadline | +50% |
+| 📦 Bulk | Up to 50% more volume | Tighter margin, more turnover |
+
+Every contract names its pickup, its drop-off, the amount, the reward and the deadline. Only routes whose source actually holds stock are offered, and the amount is **sized to your fleet** — a job never asks for more than a few loads of your biggest truck and trailer.
 
 ### 🚛 Two Ways To Run A Job
 
@@ -56,6 +64,8 @@ Changed your mind halfway? A job you accepted for yourself can still be handed t
 
 > [!TIP]
 > Over-tipping is never wasted. Deliver more than a contract needs and the surplus rolls straight onto your next open job for the same goods.
+>
+> The detail panel tells you a job's **distance, estimated fuel cost and estimated profit before you accept** — the reward is a haul, not just a goods price.
 
 ### 🚚 Per-Truck Books
 
@@ -197,7 +207,7 @@ This mod is licensed under **[CC BY-NC-ND 4.0](https://creativecommons.org/licen
 
 You may share it in its original form with attribution. You may not sell it, modify and redistribute it, or reupload it under a different name or authorship. Contributions via pull request are explicitly permitted and encouraged.
 
-**Author:** TisonK &nbsp;·&nbsp; **Version:** 2.0.0.0
+**Author:** TisonK &nbsp;·&nbsp; **Version:** 2.1.0
 
 © 2026 TisonK - See [LICENSE](LICENSE) for full terms.
 

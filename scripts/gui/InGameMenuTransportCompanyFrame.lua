@@ -522,6 +522,34 @@ function InGameMenuTransportCompanyFrame:_buildContractDetail(contract)
         string.format("%d %s", math.floor(contract.amount),
                       contract:getAmountUnitText()))
 
+    -- Difficulty tier, so an urgent premium or bulk discount is visible.
+    local tierKey = "transportCompany_tierStandard"
+    if contract.tier == TransportCompanyContract.CONTRACT_TIER_URGENT then
+        tierKey = "transportCompany_tierUrgent"
+    elseif contract.tier == TransportCompanyContract.CONTRACT_TIER_BULK then
+        tierKey = "transportCompany_tierBulk"
+    end
+    self:_addDetail("transportCompany_contractTier", g_i18n:getText(tierKey))
+
+    -- Route economics: what a haul is really worth after the diesel.
+    -- Fuel is an estimate (straight-line distance × an assumed burn
+    -- rate × the live diesel price), never a charge.
+    if contract.routeDistanceM ~= nil and contract.routeDistanceM > 0 then
+        self:_addDetail("transportCompany_contractDistance",
+            g_i18n:formatDistance(contract.routeDistanceM, 1))
+        local dieselPrice = 0
+        if g_currentMission ~= nil and g_currentMission.economyManager ~= nil then
+            dieselPrice = g_currentMission.economyManager:getCostPerLiter(FillType.DIESEL) or 0
+        end
+        local fuelLiters = contract.routeDistanceM / 1000
+            * TransportCompanyContract.EST_FUEL_L_PER_KM
+        local estFuel = fuelLiters * dieselPrice
+        self:_addDetail("transportCompany_contractEstFuel",
+            g_i18n:formatMoney(estFuel, 0, true, true))
+        self:_addDetail("transportCompany_contractEstProfit",
+            g_i18n:formatMoney(contract.reward - estFuel, 0, true, true))
+    end
+
     local stateKey = "transportCompany_statusAvailable"
     if contract.state == TransportCompanyContract.STATE_ACCEPTED then
         stateKey = "transportCompany_statusAccepted"

@@ -1,3 +1,17 @@
+v2.1.0
+
+- Rewards are now distance-driven: a long haul pays more than a short one
+  for the same goods, on top of the goods value
+- Pallet contracts are priced against the live economy: high-value goods
+  pay more per pallet than cheap ones
+- Contracts are sized to your fleet: no job ever asks for more than a few
+  loads of your biggest truck and trailer
+- Jobs come in three tiers: Standard, Urgent (shorter deadline, higher
+  pay) and Bulk (more volume, tighter margin)
+- Routes shorter than a pointless shuffle are not offered
+- The dispatch detail panel now shows distance, estimated fuel cost and
+  estimated profit before you accept
+
 v2.0.0.0
 
 - Per-farm companies: in multiplayer, every farm that owns an HQ now runs its

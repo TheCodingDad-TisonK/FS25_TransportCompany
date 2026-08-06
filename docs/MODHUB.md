@@ -34,7 +34,7 @@ Then run the **GIANTS TestRunner** on the same zip. It is the authority;
 |---|---|
 | **Mod name** | Transport Company |
 | **Zip filename** | `FS25_TransportCompany.zip` |
-| **Version** | 2.0.0.0 |
+| **Version** | 2.1.0 |
 | **Author** | TisonK |
 | **Platform** | PC / Mac |
 | **Category** | Gameplay / Placeables |
@@ -61,13 +61,17 @@ your farm. The dispatch office opens in the in-game menu with four sections:
 
 DISPATCH
 Freight jobs generated from the loading and unloading stations that already
-exist on your map, priced against the live economy. Every job names its pickup,
-its drop-off, the amount, the reward and the deadline. Bulk freight is measured
-in liters, pallet freight in pallets.
+exist on your map, priced against the live economy and the route length. A
+long haul pays more than a short one for the same goods. Every job names its
+pickup, its drop-off, the amount, the reward and the deadline. Bulk freight is
+measured in liters, pallet freight in pallets. Jobs come in three tiers:
+Standard, Urgent (shorter deadline, higher pay) and Bulk (more volume).
 
 Accept a job and haul it yourself: load at the pickup, tip at the destination,
 and watch the progress bar move as you unload. Deliver more than a contract
 needs and the surplus rolls onto your next open job rather than being wasted.
+The detail panel shows the route distance and the estimated fuel cost and
+profit before you accept.
 
 Or hire a driver and hand the route to the base game AI as a Load & Deliver
 job. Changed your mind? A job you accepted for yourself can still be handed to
@@ -151,6 +155,19 @@ erfasst. Viele Fahrzeuge gelten als Traktor und erscheinen nicht.
 ## 4. Changelog
 
 ```
+v2.1.0
+- Rewards are now distance-driven: a long haul pays more than a short one
+  for the same goods, on top of the goods value
+- Pallet contracts are priced against the live economy: high-value goods
+  pay more per pallet than cheap ones
+- Contracts are sized to your fleet: no job ever asks for more than a few
+  loads of your biggest truck and trailer
+- Jobs come in three tiers: Standard, Urgent (shorter deadline, higher
+  pay) and Bulk (more volume, tighter margin)
+- Routes shorter than a pointless shuffle are not offered
+- The dispatch detail panel now shows distance, estimated fuel cost and
+  estimated profit before you accept
+
 v2.0.0.0
 - Per-farm companies: in multiplayer, every farm that owns an HQ now runs its
   own dispatch board, its own fleet and its own ledger

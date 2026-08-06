@@ -10,8 +10,8 @@ treated as done and stable.
 | Release | Theme | Contents | Status |
 |---|---|---|---|
 | **R1 · v2.0.0** | Per-farm companies | Company class, manager→registrar, per-farm events/persistence/settings, log hygiene, generator tests, legacy save migration | ✅ Shipped (development) |
-| **R2 · v2.1.0** | Economy & route core | Distance-based reward, pallet economy link, capacity-aware sizing, route reasonableness, AI-route preference, difficulty tiers, PDA route economics | ⬜ Next |
-| **R3 · v2.2.0** | Self-haul attribution | Detect the discharging vehicle and credit its books for self-hauled jobs (engine spike first) | ⬜ |
+| **R2 · v2.1.0** | Economy & route core | Distance-based reward, pallet economy link, capacity-aware sizing, route reasonableness, AI-route preference, difficulty tiers, PDA route economics | ✅ Shipped (development) |
+| **R3 · v2.2.0** | Self-haul attribution | Detect the discharging vehicle and credit its books for self-hauled jobs (engine spike first) | ⬜ Next |
 | **R4 · v3.0.0** | Business sim | Named driver roster, reputation/XP, HQ upgrade tiers, maintenance & depreciation, ledger P&L depth | ⬜ |
 
 ## Principles

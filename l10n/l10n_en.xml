@@ -14,6 +14,13 @@
         <e k="transportCompany_contractPallets" v="Pallets"/>
         <e k="transportCompany_contractReward" v="Reward"/>
         <e k="transportCompany_contractDeadline" v="Deadline"/>
+        <e k="transportCompany_contractTier" v="Priority"/>
+        <e k="transportCompany_contractDistance" v="Distance"/>
+        <e k="transportCompany_contractEstFuel" v="Est. fuel cost"/>
+        <e k="transportCompany_contractEstProfit" v="Est. profit"/>
+        <e k="transportCompany_tierStandard" v="Standard"/>
+        <e k="transportCompany_tierUrgent" v="Urgent"/>
+        <e k="transportCompany_tierBulk" v="Bulk"/>
         <e k="transportCompany_contractTruck" v="Assigned truck"/>
         <e k="transportCompany_contractStatus" v="Status"/>
         <e k="transportCompany_statusAvailable" v="Available"/>

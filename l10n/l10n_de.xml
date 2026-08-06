@@ -14,6 +14,13 @@
         <e k="transportCompany_contractPallets" v="Paletten"/>
         <e k="transportCompany_contractReward" v="Vertragswert"/>
         <e k="transportCompany_contractDeadline" v="Frist"/>
+        <e k="transportCompany_contractTier" v="Prioritaet"/>
+        <e k="transportCompany_contractDistance" v="Distanz"/>
+        <e k="transportCompany_contractEstFuel" v="Geschaetzte Treibstoffkosten"/>
+        <e k="transportCompany_contractEstProfit" v="Geschaetzter Gewinn"/>
+        <e k="transportCompany_tierStandard" v="Standard"/>
+        <e k="transportCompany_tierUrgent" v="Dringend"/>
+        <e k="transportCompany_tierBulk" v="Masse"/>
         <e k="transportCompany_contractTruck" v="Zugewiesener LKW"/>
         <e k="transportCompany_contractStatus" v="Status"/>
         <e k="transportCompany_statusAvailable" v="Verfügbar"/>

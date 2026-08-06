@@ -5,24 +5,20 @@ merged to `main` and its in-game verification checklist is green.
 
 ## R2 · v2.1.0 — Economy & route core
 
-- [ ] Distance-based bulk reward in `TransportCompanyContract.generate` using
-      `calcDistanceFrom(sourcePlaceable.rootNode, destPlaceable.rootNode)` as
-      the straight-line proxy; add `RATE_PER_METER` and calibrate so 1.x-era
-      rewards are the low band.
-- [ ] Pallet reward ties to live economy: `amount × REWARD_PER_OBJECT ×
-      (0.5 + pricePerLiter × K)` instead of the flat 350/object.
-- [ ] Capacity-aware amount sizing from the farm's owned trucks/trailers
-      (`getAIFillUnits`); size to 1–3 trips, never an impossible one-trip ask.
-- [ ] Route reasonableness: skip sub-50 m "moves", prefer AI-haulable pairs,
-      weight source/dest pick by distance.
-- [ ] Difficulty tiers (Standard / Urgent / Bulk) with reward + deadline
-      modifiers; surface in dispatch rows and the detail panel.
-- [ ] PDA detail rows: distance, est. fuel cost, est. profit.
-- [ ] simtest5 additions: distance monotonicity, pallet economy scaling,
-      capacity clamping.
-- [ ] In-game: reward visibly scales with route length; no job exceeds the
-      biggest owned trailer within ~3 trips; urgent pays more.
-- [ ] Version bump, README/MODHUB/changelog, ROADMAP.md status → shipped.
+- [x] Distance-based bulk reward in `TransportCompanyContract.generate` using
+      `calcDistanceFrom` (straight-line proxy); `RATE_PER_METER` calibrated so
+      1.x-era rewards are the low band.
+- [x] Pallet reward ties to live economy: `computePalletReward` scales the
+      per-object base by price (gold > flour).
+- [x] Capacity-aware amount sizing from the farm's owned trucks/trailers
+      (`getMaxTripCapacity` + `getVehicleAiCapacity`); size to ≤3 trips.
+- [x] Route reasonableness: `MIN_ROUTE_DISTANCE_M` floor, AI-pair preference,
+      `pickFarthest` bias toward longer routes.
+- [x] Difficulty tiers (Standard / Urgent / Bulk) with reward + deadline
+      modifiers; surfaced in the detail panel.
+- [x] PDA detail rows: distance, est. fuel cost, est. profit.
+- [x] simtest5 additions: distance monotonicity, pallet economy scaling,
+      capacity clamp, tier-aware deadline.
 
 ## R3 · v2.2.0 — Self-haul vehicle attribution
 
