@@ -227,6 +227,12 @@ AIJobType = { GOTO = 9, LOAD_AND_DELIVER = 5 }
 g_currentMission.aiSystem = {
     startJob = function(_, job) table.insert(startedJobs, job) end,
     getJobById = function() return nil end,
+    -- Parking probe: only positions on the +X axis are reachable, so
+    -- the first candidate (12 m ahead, local +Z -> +X world) wins.
+    -- Signature: (self, x, y, z).
+    getIsPositionReachable = function(_, x, y, z)
+        return x > 0 and z == 200
+    end,
 }
 g_currentMission.placeableSystem = {}
 
@@ -274,6 +280,30 @@ if startedJobs[1] ~= nil then
     ok(posX and posZ and math.abs(posX - (100 + 12)) < 0.01 and math.abs(posZ - 200) < 0.01,
        "parking spot is offset in front of the HQ", string.format("x=%s z=%s", tostring(posX), tostring(posZ)))
     ok(ang ~= nil and ang ~= 0, "job carries a parking facing angle", tostring(ang))
+end
+
+-- The probe skips unreachable candidates: with the 12 m spot blocked,
+-- it must fall through to the next distance the AI confirms.
+g_currentMission.aiSystem.getIsPositionReachable = function(_, x, y, z)
+    -- 12 m out on +X is blocked; the other directions at 12 m are clear.
+    if math.abs(x - 112) < 0.01 then return false end
+    return x > 0 and z == 200
+end
+startedJobs = {}
+local fallContract = makeContract("retF", 1000, 1, 500, STATION_C)
+fallContract.isHiredDriver = true
+fallContract.acceptedTruckUniqueId = "vehicleRet"
+mgr:_queueReturnToHq(comp, fallContract)
+mgr:update(TransportCompanyManager.RETURN_DISPATCH_DELAY_MS + 1)
+ok(#startedJobs == 1, "fallback GOTO starts", #startedJobs)
+-- The probe skips the blocked +X candidate and takes the next reachable
+-- spot (12 m behind the HQ, x=88) rather than giving up or jumping far.
+ok(posX and posZ and math.abs(posX - (100 - 12)) < 0.01,
+   "unreachable first candidate falls to another reachable spot",
+   string.format("x=%s", tostring(posX)))
+-- Restore the stub.
+g_currentMission.aiSystem.getIsPositionReachable = function(_, x, y, z)
+    return x > 0 and z == 200
 end
 
 -- No HQ: the queued trip fires and does nothing, no crash.

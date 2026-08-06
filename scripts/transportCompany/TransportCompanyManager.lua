@@ -47,9 +47,11 @@ TransportCompanyManager.STUCK_MAX_REPLAN_ATTEMPTS = 3    -- give up after this m
 
 -- ── Return-to-HQ trip ──────────────────────────
 -- When a hired driver finishes a contract, the truck is dispatched
--- back to park in front of the company HQ instead of being left at the
--- delivery point. Offset along the building's facing (its local +Z).
-TransportCompanyManager.HQ_PARK_OFFSET_M = 12
+-- back to park near the company HQ instead of being left at the
+-- delivery point. Candidate parking distances probed around the
+-- building (the first reachable one is used), from just past the shed
+-- footprint out to a comfortable drive-off distance.
+TransportCompanyManager.HQ_PARK_DISTANCES = { 12, 20, 30 }
 -- Delay before the return GOTO job starts, so the finished AI job's
 -- agent release (deleteAgent / aiJobFinished) fully completes first.
 TransportCompanyManager.RETURN_DISPATCH_DELAY_MS = 2000
@@ -2277,13 +2279,19 @@ function TransportCompanyManager:_dispatchReturnToHq(company, contract)
     end
 end
 
----Compute a parking spot in front of an HQ owned by the given farm.
----Uses the placeable's own facing (local +Z in world space), the same
----trick AIJobGoTo:applyCurrentState uses to orient a vehicle.
+---Compute a parking spot near an HQ owned by the given farm. Probes a
+---small grid of offsets around the building (ahead, behind, each side,
+---at a few distances) and returns the first one the AI confirms is
+---reachable, so the GOTO job never reports "target unreachable" the way
+---a single blind offset did. The facing angle points at the building.
 ---@param farmId number
 ---@return number|nil x, number|nil z, number|nil angle (yaw, radians)
 function TransportCompanyManager:_getHqParkingTarget(farmId)
     if g_currentMission == nil or g_currentMission.placeableSystem == nil then
+        return nil
+    end
+    if g_currentMission.aiSystem == nil
+       or g_currentMission.aiSystem.getIsPositionReachable == nil then
         return nil
     end
 
@@ -2291,13 +2299,34 @@ function TransportCompanyManager:_getHqParkingTarget(farmId)
         if placeable ~= nil and placeable.rootNode ~= nil
            and self:_getHqFarmId(placeable) == farmId then
             local hx, _, hz = getWorldTranslation(placeable.rootNode)
-            -- Local +Z is the building front; park ahead of it so the
-            -- truck stands in front of the door, not inside the shed.
-            local dx, _, dz = localDirectionToWorld(placeable.rootNode, 0, 0, 1)
-            local px = hx + dx * TransportCompanyManager.HQ_PARK_OFFSET_M
-            local pz = hz + dz * TransportCompanyManager.HQ_PARK_OFFSET_M
-            local angle = MathUtil.getYRotationFromDirection(dx, dz)
-            return px, pz, angle
+
+            -- Candidate offsets around the building. Local axes first
+            -- (front/back/sides, the natural door directions), then the
+            -- world axes as a fallback for odd rotations. Distances go
+            -- out far enough to clear the shed footprint.
+            local fdx, _, fdz = localDirectionToWorld(placeable.rootNode, 0, 0, 1)
+            local rdx, _, rdz = localDirectionToWorld(placeable.rootNode, 1, 0, 0)
+            local worldAxes = {
+                { fdx, fdz }, { -fdx, -fdz }, { rdx, rdz }, { -rdx, -rdz },
+                { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 },
+            }
+
+            for _, distance in ipairs(TransportCompanyManager.HQ_PARK_DISTANCES) do
+                for _, axis in ipairs(worldAxes) do
+                    local px = hx + axis[1] * distance
+                    local pz = hz + axis[2] * distance
+                    if g_currentMission.aiSystem:getIsPositionReachable(px, 0, pz) then
+                        -- Face the building so the truck parks at the door.
+                        local angle = MathUtil.getYRotationFromDirection(hx - px, hz - pz)
+                        return px, pz, angle
+                    end
+                end
+            end
+
+            TransportCompanyLog.debug(
+                "return-to-HQ: no reachable parking spot near the HQ"
+            )
+            return nil
         end
     end
     return nil
