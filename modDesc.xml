@@ -51,7 +51,7 @@ Es ist keinerlei Vorbereitung der Karte noetig.
   ]]></de>
     </description>
 
-    <version>3.0.0.0</version>
+    <version>4.0.0.0</version>
     <author>TisonK</author>
     <iconFilename>textures/icon_FS25_TransportCompany.dds</iconFilename>
     <multiplayer supported="true"/>

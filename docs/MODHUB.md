@@ -34,7 +34,7 @@ Then run the **GIANTS TestRunner** on the same zip. It is the authority;
 |---|---|
 | **Mod name** | Transport Company |
 | **Zip filename** | `FS25_TransportCompany.zip` |
-| **Version** | 3.0.0.0 |
+| **Version** | 4.0.0.0 |
 | **Author** | TisonK |
 | **Platform** | PC / Mac |
 | **Category** | Gameplay / Placeables |
@@ -164,41 +164,37 @@ erfasst. Viele Fahrzeuge gelten als Traktor und erscheinen nicht.
 ## 4. Changelog
 
 ```
-v3.0.0.0
-- Run a real business: hire named drivers with weekly wages and growing
+v4.0.0.0
+- Complete overhaul. Freight dispatch is now a real business.
+- Per-farm companies: in multiplayer, every farm that owns an HQ runs its
+  own dispatch board, its own fleet and its own ledger, each with its own
+  board size, deadline, wage share and notification settings. Saved games
+  are stored per farm and upgrade in place from 1.x saves.
+- Rewards are distance-driven: a long haul pays more than a short one for
+  the same goods, on top of the goods value. Pallet contracts are priced
+  against the live economy, and contracts are sized to your fleet, so no
+  job ever asks for more than a few loads of your biggest truck and trailer.
+- Jobs come in three tiers: Standard, Urgent (shorter deadline, higher pay)
+  and Bulk (more volume, tighter margin). Routes shorter than a pointless
+  shuffle are not offered.
+- The dispatch detail panel shows distance, estimated fuel cost and
+  estimated profit before you accept.
+- Deliveries you haul yourself are credited to the truck that tipped, so the
+  Fleet tab shows revenue and job counts for your own driving too, not just
+  hired-driver runs.
+- Run a business: hire named drivers with weekly wages and growing
   experience, assign them to trucks, and grow your reputation by delivering
-  on time
-- Upgrade your headquarters for a bigger board and more driver capacity
-- Trucks need a service every 5000 km, tracked in the Fleet tab
-- The ledger now shows a rolling weekly profit and loss
+  on time. Upgrade your headquarters for a bigger board and more driver
+  capacity, and service your trucks every 5000 km.
+- The ledger shows a rolling weekly profit and loss.
 
-v2.2.0
-- Deliveries you haul yourself are now credited to the truck that tipped,
-  so the Fleet tab shows revenue and job counts for your own driving too,
-  not just hired-driver runs
-- Attribution is additive: delivery detection and payouts never depend on
-  matching a truck, so a missed match costs a display line, never a job
-
-v2.1.0
-- Rewards are now distance-driven: a long haul pays more than a short one
-  for the same goods, on top of the goods value
-- Pallet contracts are priced against the live economy: high-value goods
-  pay more per pallet than cheap ones
-- Contracts are sized to your fleet: no job ever asks for more than a few
-  loads of your biggest truck and trailer
-- Jobs come in three tiers: Standard, Urgent (shorter deadline, higher
-  pay) and Bulk (more volume, tighter margin)
-- Routes shorter than a pointless shuffle are not offered
-- The dispatch detail panel now shows distance, estimated fuel cost and
-  estimated profit before you accept
-
-v2.0.0.0
-- Per-farm companies: in multiplayer, every farm that owns an HQ now runs its
-  own dispatch board, its own fleet and its own ledger
-- Each company keeps its own board size, deadline, wage share and notification
-  settings; debug logging stays a per-player setting
-- Saved games are now stored per farm and upgrade in place from 1.x saves
-- Board diagnostics no longer spam the log on the 30-second top-up cycle
+v1.0.1.0
+- Hired drivers can now be stopped and reassigned from the dispatch office
+- A driver stuck in traffic or against an object is watched and its route is
+  replanned automatically up to three times before it is recalled
+- Jobs are only offered to hired drivers when both ends of the route really
+  support AI loading and unloading, so a dispatch no longer fails after the
+  driver is already rolling
 
 v1.0.1.0
 - Hired drivers can now be stopped and reassigned from the dispatch office

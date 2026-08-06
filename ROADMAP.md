@@ -5,16 +5,20 @@ overhaul of the current gameplay core; the engineering plumbing (MP events,
 delivery hooks, stuck-driver watchdog, settings schema, test harness) is
 treated as done and stable.
 
-## Release plan
+## v4.0.0.0 — Complete overhaul (shipped)
 
-| Release | Theme | Contents | Status |
-|---|---|---|---|
-| **R1 · v2.0.0** | Per-farm companies | Company class, manager→registrar, per-farm events/persistence/settings, log hygiene, generator tests, legacy save migration | ✅ Shipped (development) |
-| **R2 · v2.1.0** | Economy & route core | Distance-based reward, pallet economy link, capacity-aware sizing, route reasonableness, AI-route preference, difficulty tiers, PDA route economics | ✅ Shipped (development) |
-| **R3 · v2.2.0** | Self-haul attribution | Discharging-vehicle detection credits the tipping truck for self-hauled jobs; additive, never load-bearing | ✅ Shipped (development) |
-| **R4 · v3.0.0** | Business sim | Named driver roster, weekly wages & experience, reputation/level, HQ upgrade tiers, maintenance, weekly P&L | ✅ Shipped (development) |
+The overhaul shipped as one release, built in four internal phases (per-farm
+companies, economy & route core, self-haul attribution, business sim) that
+folded into a single version.
 
-## Post-R4 ideas (not yet scheduled)
+| Phase | Theme | Contents |
+|---|---|---|
+| R1 | Per-farm companies | Company class, manager→registrar, per-farm events/persistence/settings, log hygiene, generator tests, legacy save migration |
+| R2 | Economy & route core | Distance-based reward, pallet economy link, capacity-aware sizing, route reasonableness, AI-route preference, difficulty tiers, PDA route economics |
+| R3 | Self-haul attribution | Discharging-vehicle detection credits the tipping truck for self-hauled jobs; additive, never load-bearing |
+| R4 | Business sim | Named driver roster, weekly wages & experience, reputation/level, HQ upgrade tiers, maintenance, weekly P&L |
+
+## Post-4.0 ideas (not yet scheduled)
 
 - Custom HQ model (needs art; the base `easyShed01` stays).
 - Map navigation to a contract's pickup/drop-off.

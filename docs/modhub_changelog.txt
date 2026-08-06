@@ -1,34 +1,29 @@
-v2.2.0
+v4.0.0.0
 
-- Deliveries you haul yourself are now credited to the truck that tipped,
-  so the Fleet tab shows revenue and job counts for your own driving too,
-  not just hired-driver runs
-- Attribution is additive: delivery detection and payouts never depend on
-  matching a truck, so a missed match costs a display line, never a job
-
-v2.1.0
-
-- Rewards are now distance-driven: a long haul pays more than a short one
-  for the same goods, on top of the goods value
-- Pallet contracts are priced against the live economy: high-value goods
-  pay more per pallet than cheap ones
-- Contracts are sized to your fleet: no job ever asks for more than a few
-  loads of your biggest truck and trailer
-- Jobs come in three tiers: Standard, Urgent (shorter deadline, higher
-  pay) and Bulk (more volume, tighter margin)
-- Routes shorter than a pointless shuffle are not offered
-- The dispatch detail panel now shows distance, estimated fuel cost and
-  estimated profit before you accept
-
-v2.0.0.0
-
-- Per-farm companies: in multiplayer, every farm that owns an HQ now runs its
-  own dispatch board, its own fleet and its own ledger
-- Each company keeps its own board size, deadline, wage share and notification
-  settings; debug logging stays a per-player setting
-- Saved games are now stored per farm and upgrade in place from 1.x saves
-- Board diagnostics no longer spam the log on the 30-second top-up cycle
-- The contract generator is now exercised by the test suite
+- Complete overhaul. Freight dispatch is now a real business.
+- Per-farm companies: in multiplayer, every farm that owns an HQ runs its
+  own dispatch board, its own fleet and its own ledger, each with its own
+  board size, deadline, wage share and notification settings. Saved games
+  are stored per farm and upgrade in place from 1.x saves.
+- Rewards are distance-driven: a long haul pays more than a short one for
+  the same goods, on top of the goods value. Pallet contracts are priced
+  against the live economy, and contracts are sized to your fleet, so no
+  job ever asks for more than a few loads of your biggest truck and trailer.
+- Jobs come in three tiers: Standard, Urgent (shorter deadline, higher pay)
+  and Bulk (more volume, tighter margin). Routes shorter than a pointless
+  shuffle are not offered.
+- The dispatch detail panel shows distance, estimated fuel cost and
+  estimated profit before you accept.
+- Deliveries you haul yourself are credited to the truck that tipped, so the
+  Fleet tab shows revenue and job counts for your own driving too, not just
+  hired-driver runs.
+- Run a business: hire named drivers with weekly wages and growing
+  experience, assign them to trucks, and grow your reputation by delivering
+  on time. Upgrade your headquarters for a bigger board and more driver
+  capacity, and service your trucks every 5000 km.
+- The ledger shows a rolling weekly profit and loss.
+- Board diagnostics no longer spam the log on the 30-second top-up cycle.
+- The contract generator is now exercised by the test suite.
 
 v1.0.1.0
 
