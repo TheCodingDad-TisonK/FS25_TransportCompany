@@ -45,6 +45,12 @@ TransportCompanyManager.STUCK_CHECK_INTERVAL_MS = 20000  -- evaluate every 20s
 TransportCompanyManager.STUCK_MIN_DISTANCE_M = 8         -- must cover at least this far
 TransportCompanyManager.STUCK_MAX_REPLAN_ATTEMPTS = 3    -- give up after this many forced replans
 
+-- ── Return-to-HQ trip ──────────────────────────
+-- When a hired driver finishes a contract, the truck is dispatched
+-- back to park in front of the company HQ instead of being left at the
+-- delivery point. Offset along the building's facing (its local +Z).
+TransportCompanyManager.HQ_PARK_OFFSET_M = 12
+
 -- ── Singleton ─────────────────────────────────
 
 ---@return TransportCompanyManager
@@ -2098,6 +2104,9 @@ function TransportCompanyManager:_onAIServerJobStopped(job, aiMessage)
             for _, contract in pairs(company.contracts) do
                 if contract.isHiredDriver and contract.hiredDriverJobId == job.jobId then
                     self:_completeHiredDriverContract(company, contract, job)
+                    -- The truck is free now: send it back to park at the
+                    -- HQ instead of leaving it stranded at the delivery.
+                    self:_dispatchReturnToHq(company, contract)
                     break
                 end
             end
@@ -2145,6 +2154,90 @@ end
 ---@param job table The completed AI job
 function TransportCompanyManager:_completeHiredDriverContract(company, contract, job)
     self:_completeContract(company, contract)
+end
+
+---Send the truck that just finished a hired-driver contract back to
+---park in front of the company HQ. Called from the AI job success path,
+---so the vehicle is guaranteed free. A no-op when the HQ is gone, the
+---truck was sold, or the truck is not AI-capable. Never blocks the
+---completion that triggered it.
+---@param company TransportCompanyCompany
+---@param contract TransportCompanyContract
+function TransportCompanyManager:_dispatchReturnToHq(company, contract)
+    if not self.isServer then return end
+    if company == nil or contract == nil then return end
+    if not contract.isHiredDriver then return end
+
+    local truck = company.trucks[contract.acceptedTruckUniqueId]
+    if truck == nil then return end
+    local vehicle = truck:getVehicle()
+    if vehicle == nil or vehicle:getIsBeingDeleted() or vehicle.rootNode == nil then
+        return
+    end
+
+    local x, z, angle = self:_getHqParkingTarget(company.farmId)
+    if x == nil then
+        TransportCompanyLog.debug(
+            "return-to-HQ: no HQ for farm %s, truck stays put", tostring(company.farmId)
+        )
+        return
+    end
+
+    local ok, result = pcall(function()
+        local job = g_currentMission.aiJobTypeManager:createJob(AIJobType.GOTO)
+        if job == nil then return false end
+
+        job.vehicleParameter:setVehicle(vehicle)
+        job.positionAngleParameter:setPosition(x, z)
+        job.positionAngleParameter:setAngle(angle)
+        job:setValues()
+
+        local isValid, errorMessage = job:validate(company.farmId)
+        if not isValid then
+            TransportCompanyLog.debug(
+                "return-to-HQ validate failed for %s: %s",
+                tostring(truck.vehicleName or truck.uniqueId), tostring(errorMessage)
+            )
+            return false
+        end
+
+        g_currentMission.aiSystem:startJob(job, company.farmId)
+        TransportCompanyLog.info(
+            "Truck %s returning to HQ (farm %s)",
+            truck.vehicleName or truck.uniqueId, tostring(company.farmId)
+        )
+        return true
+    end)
+
+    if not ok then
+        TransportCompanyLog.error("Return-to-HQ dispatch failed: %s", tostring(result))
+    end
+end
+
+---Compute a parking spot in front of an HQ owned by the given farm.
+---Uses the placeable's own facing (local +Z in world space), the same
+---trick AIJobGoTo:applyCurrentState uses to orient a vehicle.
+---@param farmId number
+---@return number|nil x, number|nil z, number|nil angle (yaw, radians)
+function TransportCompanyManager:_getHqParkingTarget(farmId)
+    if g_currentMission == nil or g_currentMission.placeableSystem == nil then
+        return nil
+    end
+
+    for _, placeable in pairs(self.hqPlaceables) do
+        if placeable ~= nil and placeable.rootNode ~= nil
+           and self:_getHqFarmId(placeable) == farmId then
+            local hx, _, hz = getWorldTranslation(placeable.rootNode)
+            -- Local +Z is the building front; park ahead of it so the
+            -- truck stands in front of the door, not inside the shed.
+            local dx, _, dz = localDirectionToWorld(placeable.rootNode, 0, 0, 1)
+            local px = hx + dx * TransportCompanyManager.HQ_PARK_OFFSET_M
+            local pz = hz + dz * TransportCompanyManager.HQ_PARK_OFFSET_M
+            local angle = MathUtil.getYRotationFromDirection(dx, dz)
+            return px, pz, angle
+        end
+    end
+    return nil
 end
 
 ---Book money against a farm. Server-only (addMoney refuses to run on

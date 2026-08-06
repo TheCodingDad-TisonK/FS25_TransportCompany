@@ -34,7 +34,7 @@ Then run the **GIANTS TestRunner** on the same zip. It is the authority;
 |---|---|
 | **Mod name** | Transport Company |
 | **Zip filename** | `FS25_TransportCompany.zip` |
-| **Version** | 1.2.1.0 |
+| **Version** | 1.2.2.0 |
 | **Author** | TisonK |
 | **Platform** | PC / Mac |
 | **Category** | Gameplay / Placeables |
@@ -164,6 +164,11 @@ erfasst. Viele Fahrzeuge gelten als Traktor und erscheinen nicht.
 ## 4. Changelog
 
 ```
+v1.2.2.0
+- When a hired driver finishes a contract, the truck now drives itself back
+  to park in front of your Transport Company HQ instead of being left at the
+  delivery point
+
 v1.2.1.0
 - Fix: hiring a driver or upgrading the HQ no longer errors with
   "attempt to call missing method 'getFarmMoney'" (the farm balance is

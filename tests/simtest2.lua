@@ -202,5 +202,88 @@ mgr:onGoodsDelivered(STATION_C, 1, 1000, FillType.WHEAT)
 ok(attrib3.state == C.STATE_COMPLETED, "delivery completes with no truck matched")
 ok(#booked == 1, "payout independent of attribution", #booked)
 
+print("\n-- return-to-HQ after a hired driver finishes --")
+-- Stub the world + AI surface the dispatch touches.
+MathUtil = { getYRotationFromDirection = function() return 1.5 end }
+function getWorldTranslation(node) return node.hx or 100, 0, node.hz or 200 end
+function localDirectionToWorld(node) return node.dx or 1, 0, node.dz or 0 end
+local startedJobs = {}
+g_currentMission.aiJobTypeManager = {
+    createJob = function(_, jobType)
+        return {
+            jobType = jobType,
+            vehicleParameter = { setVehicle = function(_, v) selfVeh = v end },
+            positionAngleParameter = {
+                posX, posZ, ang,
+                setPosition = function(_, x, z) posX, posZ = x, z end,
+                setAngle = function(_, a) ang = a end,
+            },
+            setValues = function() end,
+            validate = function() return true end,
+        }
+    end,
+}
+AIJobType = { GOTO = 9, LOAD_AND_DELIVER = 5 }
+g_currentMission.aiSystem = {
+    startJob = function(_, job) table.insert(startedJobs, job) end,
+}
+g_currentMission.placeableSystem = {}
+
+-- A truck that completed a hired contract, parked in front of an HQ.
+local retVeh = {
+    getUniqueId = function() return "vehicleRet" end,
+    getFullName = function() return "Returner" end,
+    getOwnerFarmId = function() return 1 end,
+    getIsBeingDeleted = function() return false end,
+    getChildVehicles = function() return {} end,
+    rootNode = { hx = 100, hz = 200, dx = 1, dz = 0 },
+}
+local retTruck = TransportCompanyTruck.new(retVeh)
+retTruck.farmId = 1
+retTruck.isEnrolled = true
+comp.trucks["vehicleRet"] = retTruck
+g_currentMission.vehicleSystem.vehicleByUniqueId["vehicleRet"] = retVeh
+
+-- An HQ owned by farm 1 in the manager's registry.
+local hq = { rootNode = { hx = 100, hz = 200, dx = 1, dz = 0 } }
+hq.getOwnerFarmId = function() return 1 end
+mgr.hqPlaceables["hq1"] = hq
+
+local retContract = makeContract("ret1", 1000, 1, 500, STATION_C)
+retContract.isHiredDriver = true
+retContract.acceptedTruckUniqueId = "vehicleRet"
+retContract.hiredDriverJobId = 77
+
+startedJobs = {}
+mgr:_dispatchReturnToHq(comp, retContract)
+ok(#startedJobs == 1, "a GOTO job is started", #startedJobs)
+if startedJobs[1] ~= nil then
+    ok(startedJobs[1].jobType == AIJobType.GOTO, "job is a GOTO, not load-and-deliver",
+       startedJobs[1].jobType)
+    ok(posX ~= nil and posZ ~= nil, "job carries a parking position", string.format("%s,%s", tostring(posX), tostring(posZ)))
+    -- HQ at (100,200) facing +Z local -> +X world, parked 12 m ahead.
+    ok(posX and posZ and math.abs(posX - (100 + 12)) < 0.01 and math.abs(posZ - 200) < 0.01,
+       "parking spot is offset in front of the HQ", string.format("x=%s z=%s", tostring(posX), tostring(posZ)))
+    ok(ang ~= nil and ang ~= 0, "job carries a parking facing angle", tostring(ang))
+end
+
+-- No HQ: the truck is not dispatched, and nothing errors.
+mgr.hqPlaceables["hq1"] = nil
+startedJobs = {}
+local noHqContract = makeContract("ret2", 1000, 1, 500, STATION_C)
+noHqContract.isHiredDriver = true
+noHqContract.acceptedTruckUniqueId = "vehicleRet"
+local okNoHq, errNoHq = pcall(function() mgr:_dispatchReturnToHq(comp, noHqContract) end)
+ok(okNoHq and #startedJobs == 0, "no dispatch without an HQ, no crash", errNoHq)
+
+-- A self-hauled contract never triggers a return trip.
+mgr.hqPlaceables["hq1"] = hq
+startedJobs = {}
+local selfContract = makeContract("ret3", 1000, 1, 500, STATION_C)
+selfContract.isHiredDriver = false
+selfContract.acceptedTruckUniqueId = "vehicleRet"
+mgr:_dispatchReturnToHq(comp, selfContract)
+ok(#startedJobs == 0, "self-hauled contract does not dispatch a return trip")
+
 print(string.format("\n%d passed, %d failed", pass, fail))
 return fail

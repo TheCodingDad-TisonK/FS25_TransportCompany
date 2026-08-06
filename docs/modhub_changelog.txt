@@ -1,3 +1,9 @@
+v1.2.2.0
+
+- When a hired driver finishes a contract, the truck now drives itself back
+  to park in front of your Transport Company HQ instead of being left at the
+  delivery point
+
 v1.2.1.0
 
 - Fix: hiring a driver or upgrading the HQ no longer errors with
