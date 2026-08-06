@@ -648,11 +648,21 @@ function InGameMenuTransportCompanyFrame:_rebuildDetail()
         self.detailList:reloadData()
     end
 
-    -- The scroll hint tells the player the detail rows continue below.
-    -- Only show it when the list actually overflows, so a short detail
-    -- panel does not advertise scrolling that is not there.
+    -- Scroll affordances (slider + "Scroll for more") only make sense
+    -- on tabs whose detail panel can actually overflow: the Dispatch
+    -- contract detail and the Ledger summary/history. Settings, Drivers
+    -- and Fleet always fit, so both are hidden there to avoid implying
+    -- a clipped list that is not clipped.
+    local scrollTabs = {
+        [InGameMenuTransportCompanyFrame.TAB_DISPATCH] = true,
+        [InGameMenuTransportCompanyFrame.TAB_LEDGER] = true,
+    }
+    local wantsScroll = hasDetail and scrollTabs[self.currentTab] == true
+    if self.detailSliderBox ~= nil then
+        self.detailSliderBox:setVisible(wantsScroll)
+    end
     if self.scrollHint ~= nil then
-        self.scrollHint:setVisible(hasDetail and #self.detailRows > 6)
+        self.scrollHint:setVisible(wantsScroll and #self.detailRows > 6)
     end
 end
 

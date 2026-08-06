@@ -71,8 +71,9 @@
 				<!-- A visible slider so players know the detail rows scroll
 				     instead of reading a clipped list as the end. The
 				     slider box profile positions itself at the wrapper's
-				     right edge, the same way the left list does. -->
-				<ThreePartBitmap profile="fs25_subCategoryListSliderBox">
+				     right edge, the same way the left list does. It is
+				     hidden on tabs whose detail never overflows. -->
+				<ThreePartBitmap profile="fs25_subCategoryListSliderBox" id="detailSliderBox">
 					<Slider profile="fs25_listSlider" dataElementId="detailList"/>
 				</ThreePartBitmap>
 			</GuiElement>
