@@ -69,13 +69,13 @@ Changed your mind halfway? A job you accepted for yourself can still be handed t
 
 ### 🚚 Per-Truck Books
 
-The base game only keeps farm-wide statistics. This tracks every truck separately.
+The base game only keeps farm-wide statistics. This tracks every truck separately — including the jobs **you** drive.
 
 | | Tracked | Source |
 |---|---|---|
 | 📏 | **Distance** | Accumulated every physics tick, not sampled |
 | ⛽ | **Fuel** | Diesel burned, valued at the live economy price |
-| 💰 | **Revenue** | Contracts delivered with that truck |
+| 💰 | **Revenue** | Contracts delivered with that truck, hauled by you or a hired driver |
 | 👷 | **Wages** | Driver cuts, kept separate from fuel |
 | 📦 | **Jobs** | Completed deliveries |
 
@@ -85,7 +85,7 @@ Trucks enrol themselves. Anything the base game classes as a truck and your farm
 
 Revenue, driver wages, fuel, distance and job count for the company as a whole, followed by a history of every finished and expired contract, newest first.
 
-Company figures are tracked separately from the fleet on purpose — a load you tip yourself cannot be pinned to a specific truck, because the station reports liters and a position, never the vehicle that delivered them.
+Company figures are tracked separately from the fleet on purpose — a load you tip yourself is credited to the truck that is physically discharging, but the aggregate company book keeps one consistent total regardless of how a job was run.
 
 ### 📱 Dispatch Office
 
@@ -181,6 +181,7 @@ Available with the developer console enabled.
 | 💰 **Selling stations pay twice** | If a contract's destination happens to be a selling point, you are paid for the goods and for the contract. Defensible — you were paid to haul someone's cargo — but worth knowing. |
 | 🌐 **Multiplayer** | Each farm that owns an HQ runs its own company — independent board, fleet, ledger and settings. Contracts, payouts and AI dispatch run on the server. Clients request changes and receive the result for their own company. |
 | 📦 **Pallet contracts** | Counted at 1000 L per pallet, the standard FS capacity. Unusual pallets may not line up exactly. |
+| 🚛 **Self-haul attribution** | A self-hauled delivery is credited to the truck that is physically discharging at the station. If the match cannot be made (a parked truck, an unusual setup), the job still completes and pays — it just is not pinned to a truck in the Fleet tab. |
 
 ---
 
@@ -207,7 +208,7 @@ This mod is licensed under **[CC BY-NC-ND 4.0](https://creativecommons.org/licen
 
 You may share it in its original form with attribution. You may not sell it, modify and redistribute it, or reupload it under a different name or authorship. Contributions via pull request are explicitly permitted and encouraged.
 
-**Author:** TisonK &nbsp;·&nbsp; **Version:** 2.1.0
+**Author:** TisonK &nbsp;·&nbsp; **Version:** 2.2.0.0
 
 © 2026 TisonK - See [LICENSE](LICENSE) for full terms.
 

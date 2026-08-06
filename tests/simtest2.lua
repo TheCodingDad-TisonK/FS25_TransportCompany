@@ -30,6 +30,7 @@ g_currentMission = {
   end,
   addIngameNotification = function() end,
   getFarmId = function() return 1 end,
+  vehicleSystem = { vehicleByUniqueId = {} },
 }
 FSBaseMission = { INGAME_NOTIFICATION_OK = {} }
 g_i18n = { getText=function(_,k) return k end,
@@ -138,6 +139,68 @@ comp.settings:set("enabled", false)
 mgr:onGoodsDelivered(STATION_A, 1, 100, FillType.WHEAT)
 ok(approx(e1.delivered, 0), "no credit while disabled", e1.delivered)
 comp.settings:set("enabled", true)
+
+print("\n-- self-haul attribution: the tipping truck is credited --")
+-- A truck whose trailer reports it is discharging into STATION_C must
+-- get the revenue and job count when the delivery completes, even
+-- though no truck was assigned to the contract up front.
+local STATION_C = {name="C"}
+booked = {}
+local dispVeh = {
+    getUniqueId = function() return "vehicleTip" end,
+    getFullName = function() return "Tipper" end,
+    getOwnerFarmId = function() return 1 end,
+    getIsBeingDeleted = function() return false end,
+    getChildVehicles = function()
+        return { {
+            getCurrentDischargeNode = function() return {} end,
+            getCurrentDischargeObject = function(_, node) return STATION_C end,
+        } }
+    end,
+}
+local tipTruck = TransportCompanyTruck.new(dispVeh)
+tipTruck.farmId = 1
+tipTruck.isEnrolled = true
+comp.trucks["vehicleTip"] = tipTruck
+g_currentMission.vehicleSystem.vehicleByUniqueId["vehicleTip"] = dispVeh
+local attrib = makeContract("att", 1000, 1, 500, STATION_C)
+mgr:onGoodsDelivered(STATION_C, 1, 1000, FillType.WHEAT)
+ok(attrib.state == C.STATE_COMPLETED, "self-haul contract completes", attrib.state)
+ok(tipTruck.revenue == 500, "tipping truck credited the full reward", tipTruck.revenue)
+ok(tipTruck.jobsDelivered == 1, "tipping truck got the job count", tipTruck.jobsDelivered)
+ok(#booked == 1, "payout still happens exactly once", #booked)
+-- A truck NOT discharging at the station must not be credited.
+local idleVeh = {
+    getUniqueId = function() return "vehicleIdle" end,
+    getFullName = function() return "Idle" end,
+    getOwnerFarmId = function() return 1 end,
+    getIsBeingDeleted = function() return false end,
+    getChildVehicles = function()
+        return { {
+            getCurrentDischargeNode = function() return {} end,
+            getCurrentDischargeObject = function() return {} end,  -- not STATION_C
+        } }
+    end,
+}
+local idleTruck = TransportCompanyTruck.new(idleVeh)
+idleTruck.farmId = 1
+idleTruck.isEnrolled = true
+comp.trucks["vehicleIdle"] = idleTruck
+g_currentMission.vehicleSystem.vehicleByUniqueId["vehicleIdle"] = idleVeh
+booked = {}
+local attrib2 = makeContract("att2", 1000, 1, 500, STATION_C)
+mgr:onGoodsDelivered(STATION_C, 1, 1000, FillType.WHEAT)
+ok(attrib2.state == C.STATE_COMPLETED, "second self-haul contract completes")
+ok(idleTruck.revenue == 0 and idleTruck.jobsDelivered == 0,
+   "non-discharging truck is not credited", idleTruck.revenue)
+-- And with NO truck discharging, the delivery still pays (additive only).
+comp.trucks["vehicleTip"] = nil
+comp.trucks["vehicleIdle"] = nil
+booked = {}
+local attrib3 = makeContract("att3", 1000, 1, 500, STATION_C)
+mgr:onGoodsDelivered(STATION_C, 1, 1000, FillType.WHEAT)
+ok(attrib3.state == C.STATE_COMPLETED, "delivery completes with no truck matched")
+ok(#booked == 1, "payout independent of attribution", #booked)
 
 print(string.format("\n%d passed, %d failed", pass, fail))
 return fail

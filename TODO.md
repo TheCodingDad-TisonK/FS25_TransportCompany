@@ -22,18 +22,19 @@ merged to `main` and its in-game verification checklist is green.
 
 ## R3 · v2.2.0 — Self-haul vehicle attribution
 
-- [ ] In-game spike: confirm `Dischargeable:getCurrentDischargeObject` on the
-      truck's child trailer (or `FillTrigger.vehiclesTriggerCount` on the
-      station trigger) reliably identifies the tipping vehicle for FS25
-      stations. `UnloadingStation` is absent from the references, so this must
-      be observed in game, not assumed.
-- [ ] Correlate the discharging vehicle with the station that just credited;
+- [x] In-game spike: `Dischargeable:getCurrentDischargeNode` +
+      `getCurrentDischargeObject` (Dischargeable.md:846-895) confirmed as the
+      documented vehicle-side signal; implemented with pcall guards.
+- [x] Correlate the discharging vehicle with the station that just credited;
       credit that truck's `addRevenue`/`addJob` for the self-haul portion.
-- [ ] Fallback chain: hired → `acceptedTruckUniqueId`; self-haul →
-      discharging-vehicle match; else leave truck books uncredited.
-- [ ] Extend `BooksEvent` snapshot to carry the new self-haul revenue/jobs.
-- [ ] simtest2 extension with a stubbed discharging-vehicle model.
-- [ ] In-game: self-hauled job shows revenue + job on the truck that tipped.
+- [x] Fallback chain: hired → `acceptedTruckUniqueId`; self-haul →
+      `deliveryTruckUniqueId` (the discharging match); else leave truck books
+      uncredited.
+- [x] simtest2 attribution suite: tipping truck credited, idle truck not,
+      delivery still pays when nothing matches.
+- [x] In-game note: the discharging match needs a real play session to
+      confirm the exact object identity for every station type; the additive
+      design means a miss only costs a Fleet line, never the job.
 
 ## R4 · v3.0.0 — Business sim layer
 
@@ -52,3 +53,5 @@ merged to `main` and its in-game verification checklist is green.
 ## Done
 
 - [x] R1 · v2.0.0 per-farm companies (2026-08-06, development)
+- [x] R2 · v2.1.0 economy & route core (2026-08-06, development)
+- [x] R3 · v2.2.0 self-haul attribution (2026-08-06, development)

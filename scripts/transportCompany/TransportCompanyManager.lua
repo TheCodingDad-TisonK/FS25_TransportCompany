@@ -1586,6 +1586,18 @@ function TransportCompanyManager:onGoodsDelivered(station, farmId, liters, fillT
     if company == nil or company.isArchived then return end
     if not company.settings:get("enabled") then return end
 
+    -- Self-haul attribution: find the truck that is physically tipping
+    -- into this station right now. Only meaningful on the first delivery
+    -- tick (the hook fires every tick goods arrive), and only when no
+    -- truck was assigned up front. The discharging check reads the
+    -- vehicle's own discharge state, so it is additive: if nothing can
+    -- be matched, delivery and payout still proceed uncredited to a
+    -- truck, exactly as before.
+    local dischargeTruck = nil
+    if liters > 0 then
+        dischargeTruck = self:_findDischargingTruck(company, station)
+    end
+
     local remaining = liters
     for _, contract in pairs(company.contracts) do
         if remaining <= 0 then break end
@@ -1593,6 +1605,13 @@ function TransportCompanyManager:onGoodsDelivered(station, farmId, liters, fillT
            and contract.farmId == farmId
            and contract.fillTypeIndex == fillType
            and contract:getDestStation() == station then
+
+            -- Attribute a self-hauled delivery to the truck that tipped,
+            -- so the Fleet tab shows revenue/jobs for jobs the player
+            -- drove themselves, not only hired-driver runs.
+            if dischargeTruck ~= nil and not contract.isHiredDriver then
+                contract.deliveryTruckUniqueId = dischargeTruck.uniqueId
+            end
 
             local consumed, isComplete = contract:addDeliveredLiters(remaining)
             if consumed > 0 then
@@ -1609,6 +1628,49 @@ function TransportCompanyManager:onGoodsDelivered(station, farmId, liters, fillT
     end
 end
 
+---Find the enrolled truck whose vehicle (or attached trailer) is
+---currently discharging into the given station. Uses the vehicle-side
+---discharge state: getCurrentDischargeNode + getCurrentDischargeObject
+---(Dischargeable.md:846-895), which is the reliable direction — the
+---station's addFillLevelFromTool call carries no vehicle reference.
+---@param company TransportCompanyCompany
+---@param station table The receiving station
+---@return TransportCompanyTruck|nil
+function TransportCompanyManager:_findDischargingTruck(company, station)
+    if company == nil or station == nil then return nil end
+
+    local function dischargesTo(vehicle)
+        if vehicle == nil or vehicle.getCurrentDischargeNode == nil
+           or vehicle.getCurrentDischargeObject == nil then
+            return false
+        end
+        local ok, node = pcall(vehicle.getCurrentDischargeNode, vehicle)
+        if not ok or node == nil then
+            return false
+        end
+        local ok2, object = pcall(vehicle.getCurrentDischargeObject, vehicle, node)
+        return ok2 and object == station
+    end
+
+    for _, truck in pairs(company.trucks) do
+        local vehicle = truck:getVehicle()
+        if vehicle ~= nil and not vehicle:getIsBeingDeleted() then
+            if dischargesTo(vehicle) then
+                return truck
+            end
+            -- The trailer is the thing that usually tips; check children.
+            if vehicle.getChildVehicles ~= nil then
+                for _, child in ipairs(vehicle:getChildVehicles() or {}) do
+                    if dischargesTo(child) then
+                        return truck
+                    end
+                end
+            end
+        end
+    end
+    return nil
+end
+
 ---Pay out a finished contract. This is the single completion path:
 ---both the player tipping the last liters at the destination and a
 ---hired driver's AI job finishing land here, and contract:complete()
@@ -1620,7 +1682,15 @@ function TransportCompanyManager:_completeContract(company, contract)
     if not contract:complete() then return end
 
     local farmId = company.farmId
+    -- A hired driver was assigned a truck up front. A self-hauled job
+    -- may carry the truck that actually tipped (deliveryTruckUniqueId,
+    -- set by onGoodsDelivered); fall back to that so the Fleet tab
+    -- credits jobs the player drove themselves.
     local truck = company.trucks[contract.acceptedTruckUniqueId]
+    if truck == nil and contract.deliveryTruckUniqueId ~= nil
+       and contract.deliveryTruckUniqueId ~= "" then
+        truck = company.trucks[contract.deliveryTruckUniqueId]
+    end
 
     -- addMoney rejects farmId 0 outright ("Can't change money of
     -- spectator farm", FSBaseMission.lua:2006).

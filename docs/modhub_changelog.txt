@@ -1,3 +1,11 @@
+v2.2.0
+
+- Deliveries you haul yourself are now credited to the truck that tipped,
+  so the Fleet tab shows revenue and job counts for your own driving too,
+  not just hired-driver runs
+- Attribution is additive: delivery detection and payouts never depend on
+  matching a truck, so a missed match costs a display line, never a job
+
 v2.1.0
 
 - Rewards are now distance-driven: a long haul pays more than a short one

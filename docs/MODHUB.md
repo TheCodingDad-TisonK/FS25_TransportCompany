@@ -34,7 +34,7 @@ Then run the **GIANTS TestRunner** on the same zip. It is the authority;
 |---|---|
 | **Mod name** | Transport Company |
 | **Zip filename** | `FS25_TransportCompany.zip` |
-| **Version** | 2.1.0 |
+| **Version** | 2.2.0.0 |
 | **Author** | TisonK |
 | **Platform** | PC / Mac |
 | **Category** | Gameplay / Placeables |
@@ -80,7 +80,8 @@ a driver later.
 FLEET
 Every truck keeps its own books: distance driven, diesel burned valued at the
 live economy price, revenue earned, driver wages paid and jobs completed.
-Trucks enrol themselves as soon as you buy them.
+Jobs you haul yourself are credited to the truck that tipped, alongside
+hired-driver runs. Trucks enrol themselves as soon as you buy them.
 
 LEDGER
 Company totals plus a history of every finished and expired contract.
@@ -155,6 +156,13 @@ erfasst. Viele Fahrzeuge gelten als Traktor und erscheinen nicht.
 ## 4. Changelog
 
 ```
+v2.2.0
+- Deliveries you haul yourself are now credited to the truck that tipped,
+  so the Fleet tab shows revenue and job counts for your own driving too,
+  not just hired-driver runs
+- Attribution is additive: delivery detection and payouts never depend on
+  matching a truck, so a missed match costs a display line, never a job
+
 v2.1.0
 - Rewards are now distance-driven: a long haul pays more than a short one
   for the same goods, on top of the goods value

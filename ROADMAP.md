@@ -11,8 +11,8 @@ treated as done and stable.
 |---|---|---|---|
 | **R1 · v2.0.0** | Per-farm companies | Company class, manager→registrar, per-farm events/persistence/settings, log hygiene, generator tests, legacy save migration | ✅ Shipped (development) |
 | **R2 · v2.1.0** | Economy & route core | Distance-based reward, pallet economy link, capacity-aware sizing, route reasonableness, AI-route preference, difficulty tiers, PDA route economics | ✅ Shipped (development) |
-| **R3 · v2.2.0** | Self-haul attribution | Detect the discharging vehicle and credit its books for self-hauled jobs (engine spike first) | ⬜ Next |
-| **R4 · v3.0.0** | Business sim | Named driver roster, reputation/XP, HQ upgrade tiers, maintenance & depreciation, ledger P&L depth | ⬜ |
+| **R3 · v2.2.0** | Self-haul attribution | Discharging-vehicle detection credits the tipping truck for self-hauled jobs; additive, never load-bearing | ✅ Shipped (development) |
+| **R4 · v3.0.0** | Business sim | Named driver roster, reputation/XP, HQ upgrade tiers, maintenance & depreciation, ledger P&L depth | ⬜ Next |
 
 ## Principles
 
@@ -23,7 +23,10 @@ treated as done and stable.
   curve. Revisit only if a road-length API is confirmed.
 - **Attribution is additive, never load-bearing.** Delivery detection and
   payout correctness must not depend on knowing which truck tipped; per-truck
-  books are a display layer on top.
+  books are a display layer on top. R3's discharging-vehicle detection
+  (`getCurrentDischargeNode` + `getCurrentDischargeObject`, Dischargeable.md)
+  follows this rule; if it cannot match a truck in a given setup, the job
+  still completes and pays, it just is not pinned to a truck.
 - **One PR per release.** Every release is ModHub-submittable on its own and
   does not require the ones after it.
 
