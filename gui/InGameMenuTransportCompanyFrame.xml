@@ -83,15 +83,13 @@
 		  that is what was clamping the text.
 		-->
 		<Profile name="fs25_tcListPrimary" extends="fs25_textDarkHighlight" with="anchorTopLeft">
-			<size value="268px 40px"/>
+			<size value="268px 32px"/>
 			<position value="100px -18px"/>
 			<textSize value="24px"/>
-			<textWrapWidth value="260px"/>
-			<textMaxNumLines value="2"/>
 		</Profile>
 		<Profile name="fs25_tcListLeft" extends="fs25_textDarkHighlight" with="anchorBottomLeft">
 			<size value="150px 28px"/>
-			<position value="100px 38px"/>
+			<position value="100px 26px"/>
 			<textSize value="22px"/>
 			<textVerticalAlignment value="bottom"/>
 			<textColor value="$preset_fs25_colorMainHighlight"/>
@@ -100,7 +98,7 @@
 		</Profile>
 		<Profile name="fs25_tcListRight" extends="fs25_textDarkHighlight" with="anchorBottomRight">
 			<size value="150px 28px"/>
-			<position value="-38px 38px"/>
+			<position value="-38px 26px"/>
 			<textSize value="22px"/>
 			<textAlignment value="right"/>
 		</Profile>
@@ -143,24 +141,20 @@
 			<handleFocus value="false"/>
 		</Profile>
 		<Profile name="fs25_tcDetailItem" extends="baseReference" with="anchorTopStretchingX alternating">
-			<height value="44px"/>
+			<height value="40px"/>
 			<imageColor value="$preset_fs25_colorGrey"/>
 			<alternateBackgroundColor value="$preset_fs25_colorGreyDark_50"/>
 		</Profile>
 		<Profile name="fs25_tcDetailLabel" extends="fs25_textDefault" with="anchorTopLeft">
-			<size value="50% 44px"/>
+			<height value="40px"/>
 			<textOffset value="14px 0px"/>
-			<textWrapWidth value="400px"/>
-			<textMaxNumLines value="2"/>
 		</Profile>
 		<Profile name="fs25_tcDetailValue" extends="fs25_textDefault" with="anchorTopRight">
-			<size value="50% 44px"/>
+			<height value="40px"/>
 			<textBold value="true"/>
 			<textAlignment value="right"/>
 			<textOffset value="-14px 0px"/>
 			<textColor value="$preset_fs25_colorMainHighlight"/>
-			<textWrapWidth value="400px"/>
-			<textMaxNumLines value="2"/>
 		</Profile>
 		<Profile name="fs25_tcProgressLabel" extends="fs25_textDefault" with="anchorTopCenter">
 			<size value="820px 30px"/>

@@ -32,13 +32,13 @@
             <Text profile="helpCounter" id="pageCounter" position="0px -508px" text=""/>
 
             <!-- Prev / Next (3-layer) -->
-            <Bitmap profile="helpNavBg" id="btnPrevBg" position="-180px -545px"/>
-            <Button profile="helpNavHit" id="btnPrev" position="-180px -545px" onClick="onClickPrev"/>
-            <Text profile="helpNavText" id="btnPrevText" position="-180px -550px" text="&lt; Prev"/>
+            <Bitmap profile="helpNavBg" id="btnPrevBg" position="-80px -545px"/>
+            <Button profile="helpNavHit" id="btnPrev" position="-80px -545px" onClick="onClickPrev"/>
+            <Text profile="helpNavText" id="btnPrevText" position="-80px -550px" text="&lt; Prev"/>
 
-            <Bitmap profile="helpNavBg" id="btnNextBg" position="180px -545px"/>
-            <Button profile="helpNavHit" id="btnNext" position="180px -545px" onClick="onClickNext"/>
-            <Text profile="helpNavText" id="btnNextText" position="180px -550px" text="Next &gt;"/>
+            <Bitmap profile="helpNavBg" id="btnNextBg" position="80px -545px"/>
+            <Button profile="helpNavHit" id="btnNext" position="80px -545px" onClick="onClickNext"/>
+            <Text profile="helpNavText" id="btnNextText" position="80px -550px" text="Next &gt;"/>
 
         </GuiElement>
 
