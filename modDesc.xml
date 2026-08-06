@@ -85,8 +85,13 @@ Es ist keinerlei Vorbereitung der Karte noetig.
         <sourceFile filename="scripts/transportCompany/events/TransportCompanyDriverEvent.lua"/>
         <sourceFile filename="scripts/transportCompany/TransportCompanyManager.lua"/>
         <sourceFile filename="scripts/gui/InGameMenuTransportCompanyFrame.lua"/>
+        <sourceFile filename="scripts/gui/TransportCompanyHelpDialog.lua"/>
         <sourceFile filename="scripts/TransportCompany.lua"/>
     </extraSourceFiles>
+
+    <guis>
+        <gui filename="gui/TransportCompanyHelpDialog.xml"/>
+    </guis>
 
     <l10n filenamePrefix="l10n/l10n"/>
 </modDesc>

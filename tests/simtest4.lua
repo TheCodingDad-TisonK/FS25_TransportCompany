@@ -53,12 +53,35 @@ function TabbedMenuFrameElement:onFrameClose() end
 function TabbedMenuFrameElement:setMenuButtonInfo(i) self.menuButtonInfo = i end
 function TabbedMenuFrameElement:setMenuButtonInfoDirty() self.dirty = true end
 
+-- minimal MessageDialog base for the help dialog
+MessageDialog = {}
+MessageDialog.new = function(target, mt) return setmetatable({}, mt) end
+function MessageDialog:onCreate() end
+function MessageDialog:onOpen() end
+function MessageDialog:onClose() end
+function MessageDialog:close() self.isClosed = true end
+function MessageDialog:setText() end
+
+g_gui = {
+    guis = {},
+    loadGui = function(_, xml, name, instance)
+        g_gui.guis[name] = instance
+    end,
+    showDialog = function(_, name)
+        g_gui.shownName = name
+        if g_gui.guis[name] and g_gui.guis[name].onOpen then
+            g_gui.guis[name]:onOpen()
+        end
+    end,
+}
+
 dofile(ROOT .. "/scripts/transportCompany/TransportCompanyContract.lua")
 dofile(ROOT .. "/scripts/transportCompany/TransportCompanyTruck.lua")
 dofile(ROOT .. "/scripts/transportCompany/TransportCompanySettings.lua")
 dofile(ROOT .. "/scripts/transportCompany/TransportCompanyCompany.lua")
 dofile(ROOT .. "/scripts/transportCompany/TransportCompanyManager.lua")
 dofile(ROOT .. "/scripts/gui/InGameMenuTransportCompanyFrame.lua")
+dofile(ROOT .. "/scripts/gui/TransportCompanyHelpDialog.lua")
 
 TransportCompanyContractEvent = { TYPE_ADD = 1, TYPE_UPDATE = 2, TYPE_STATE_CHANGE = 3,
                                   TYPE_REMOVE = 4, sendEvent = function() end }
@@ -211,6 +234,65 @@ for _, r in ipairs(frame.rows) do if r.contract ~= nil then hist = hist + 1 end 
 ok(hist == 1, "finished job listed as history", hist)
 ok(frame.rows[1].primary ~= frame.rows[2].primary,
    "history row is not a copy of the summary")
+
+print("")
+print("-- help footer button is on every tab --")
+g_currentModDirectory = "/mods/tc/"
+local frame2 = InGameMenuTransportCompanyFrame.new()
+frame2.getDescendantById = function() return nil end
+local okInit, errInit = pcall(function() frame2:initialize() end)
+ok(okInit, "frame initializes with the help button", errInit)
+ok(frame2.helpButtonInfo ~= nil and frame2.helpButtonInfo.text ~= nil,
+   "help button defined with a label", frame2.helpButtonInfo and frame2.helpButtonInfo.text)
+frame2.setMenuButtonInfo = function(_, buttons) frame2.lastButtons = buttons end
+frame2.setMenuButtonInfoDirty = function() end
+frame2.contentList = { selectedIndex = 0 }
+frame2.currentTab = InGameMenuTransportCompanyFrame.TAB_DISPATCH
+frame2:_updateMenuButtons()
+local hasHelp = false
+for _, b in ipairs(frame2.lastButtons) do
+    if b == frame2.helpButtonInfo then hasHelp = true end
+end
+ok(hasHelp, "help button present in the footer", hasHelp)
+ok(frame2.lastButtons[1] == frame2.backButtonInfo, "back stays the first button")
+
+print("")
+print("-- help dialog pages --")
+local help = TransportCompanyHelpDialog.new()
+help.titleText   = { setText = function(s, v) s.v = v end }
+help.bodyText    = { setText = function(s, v) s.v = v end }
+help.pageCounter = { setText = function(s, v) s.v = v end }
+help.btnPrevBg   = { setImageColor = function() end }
+help.btnPrevText = { setTextColor = function() end }
+help.btnNextBg   = { setImageColor = function() end }
+help.btnNextText = { setTextColor = function() end }
+ok(#TransportCompanyHelpDialog.PAGES >= 6, "at least six guide pages", #TransportCompanyHelpDialog.PAGES)
+help:showPage(1)
+ok(help.currentPage == 1, "starts on page 1")
+ok(help.titleText.v ~= "" and help.bodyText.v ~= "", "page 1 has title and body")
+ok(help.pageCounter.v == "1 / " .. #TransportCompanyHelpDialog.PAGES, "counter shows position",
+   help.pageCounter.v)
+help:showPage(2)
+ok(help.currentPage == 2, "next page advances")
+help:onClickPrev()
+ok(help.currentPage == 1, "prev goes back")
+help:onClickPrev()
+ok(help.currentPage == 1, "prev clamps at page 1")
+help:showPage(#TransportCompanyHelpDialog.PAGES)
+help:onClickNext()
+ok(help.currentPage == #TransportCompanyHelpDialog.PAGES, "next clamps at the last page")
+help:onClickClose()
+ok(help.isClosed == true, "close dismisses the dialog")
+
+print("")
+print("-- help dialog opens from the frame --")
+g_gui.shownName = nil
+g_transportCompanyHelpDialog = nil
+TransportCompanyHelpDialog.show()
+ok(g_gui.shownName == "transportCompanyHelpDialog", "dialog opened via g_gui:showDialog",
+   tostring(g_gui.shownName))
+ok(g_transportCompanyHelpDialog ~= nil, "dialog instance cached", g_transportCompanyHelpDialog)
+ok(g_transportCompanyHelpDialog.currentPage == 1, "opens on the first page")
 
 print(string.format("\n%d passed, %d failed", pass, fail))
 return fail

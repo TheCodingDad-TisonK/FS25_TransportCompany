@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="utf-8" standalone="no" ?>
+<!--
+  FS25 Transport Company - Help Dialog
+
+  Paged guide opened from the Dispatch Office footer (Help button).
+  Layout mirrors the proven MessageDialog pattern (see NPCFavor
+  NPCDialog.xml): a fullscreen dim behind a centered dialog panel,
+  content anchored top-center, and 3-layer buttons (Bitmap bg + Button
+  hit + Text) for navigation so hover colour works.
+
+  Coordinate note: dialog content X is center-relative, Y is negative
+  going down from the top of the content container.
+-->
+<GUI onOpen="onOpen" onClose="onClose" onCreate="onCreate">
+    <GuiElement profile="newLayer" />
+    <Bitmap profile="dialogFullscreenBg" id="dialogBg" />
+
+    <GuiElement profile="dialogBg" id="dialogElement" size="780px 620px">
+        <ThreePartBitmap profile="fs25_dialogBgMiddle" />
+        <ThreePartBitmap profile="fs25_dialogBgTop" />
+        <ThreePartBitmap profile="fs25_dialogBgBottom" />
+
+        <GuiElement profile="fs25_dialogContentContainer">
+
+            <!-- Title -->
+            <Text profile="helpTitle" id="titleText" position="0px -14px" text=""/>
+
+            <!-- Body (wrapped, roomy) -->
+            <Text profile="helpBody" id="bodyText" position="0px -52px" text=""/>
+
+            <!-- Page counter -->
+            <Text profile="helpCounter" id="pageCounter" position="0px -508px" text=""/>
+
+            <!-- Prev / Next (3-layer) -->
+            <Bitmap profile="helpNavBg" id="btnPrevBg" position="-180px -545px"/>
+            <Button profile="helpNavHit" id="btnPrev" position="-180px -545px" onClick="onClickPrev"/>
+            <Text profile="helpNavText" id="btnPrevText" position="-180px -550px" text="&lt; Prev"/>
+
+            <Bitmap profile="helpNavBg" id="btnNextBg" position="180px -545px"/>
+            <Button profile="helpNavHit" id="btnNext" position="180px -545px" onClick="onClickNext"/>
+            <Text profile="helpNavText" id="btnNextText" position="180px -550px" text="Next &gt;"/>
+
+        </GuiElement>
+
+        <BoxLayout profile="fs25_dialogButtonBox">
+            <Button profile="buttonBack" id="closeButton" text="Close" onClick="onClickClose"/>
+        </BoxLayout>
+
+    </GuiElement>
+
+    <GUIProfiles>
+        <Profile name="helpTitle" extends="fs25_textDefault" with="anchorTopCenter">
+            <size value="700px 30px"/>
+            <textSize value="26px"/>
+            <textBold value="true"/>
+            <textAlignment value="center"/>
+            <textColor value="$preset_fs25_colorMainHighlight"/>
+        </Profile>
+
+        <Profile name="helpBody" extends="fs25_textDefault" with="anchorTopCenter">
+            <size value="700px 440px"/>
+            <textSize value="19px"/>
+            <textAlignment value="left"/>
+            <textVerticalAlignment value="top"/>
+            <textWrapWidth value="690px"/>
+            <textMaxNumLines value="30"/>
+            <textColor value="0.85 0.85 0.85 1"/>
+        </Profile>
+
+        <Profile name="helpCounter" extends="fs25_textDefault" with="anchorTopCenter">
+            <size value="300px 24px"/>
+            <textSize value="16px"/>
+            <textAlignment value="center"/>
+            <textColor value="0.55 0.55 0.55 1"/>
+        </Profile>
+
+        <Profile name="helpNavBg" extends="emptyPanel" with="anchorTopCenter">
+            <size value="150px 40px"/>
+            <imageColor value="0.15 0.15 0.18 1"/>
+            <imageSliceId value="gui.button_middle"/>
+            <startImageSize value="6px 0"/>
+            <startImageSliceId value="gui.button_left"/>
+            <endImageSize value="6px 0"/>
+            <endImageSliceId value="gui.button_right"/>
+        </Profile>
+
+        <Profile name="helpNavHit" extends="emptyPanel" with="anchorTopCenter">
+            <size value="150px 40px"/>
+            <handleFocus value="true"/>
+        </Profile>
+
+        <Profile name="helpNavText" extends="fs25_textDefault" with="anchorTopCenter">
+            <size value="150px 40px"/>
+            <textSize value="18px"/>
+            <textBold value="true"/>
+            <textAlignment value="center"/>
+            <textColor value="1 1 1 1"/>
+        </Profile>
+    </GUIProfiles>
+</GUI>
