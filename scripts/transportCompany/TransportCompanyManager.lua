@@ -50,6 +50,11 @@ TransportCompanyManager.STUCK_MAX_REPLAN_ATTEMPTS = 3    -- give up after this m
 -- back to park in front of the company HQ instead of being left at the
 -- delivery point. Offset along the building's facing (its local +Z).
 TransportCompanyManager.HQ_PARK_OFFSET_M = 12
+-- Delay before the return GOTO job starts, so the finished AI job's
+-- agent release (deleteAgent / aiJobFinished) fully completes first.
+TransportCompanyManager.RETURN_DISPATCH_DELAY_MS = 2000
+-- Delay before a retried return trip after the first validate failed.
+TransportCompanyManager.RETURN_RETRY_DELAY_MS = 8000
 
 -- ── Singleton ─────────────────────────────────
 
@@ -132,6 +137,18 @@ function TransportCompanyManager.new(modDirectory, modName)
 
     -- Change-only board diagnostics: farmId → last logged snapshot.
     self._lastBoardSnapshot = {}
+
+    -- Pending return-to-HQ trips: { company, contract, timer }. The
+    -- return GOTO job is started a couple of seconds AFTER the AI job
+    -- it follows reports success, not synchronously inside the
+    -- AI_JOB_STOPPED handler, so the old job's agent teardown
+    -- (deleteAgent / aiJobFinished) has fully completed first. Starting
+    -- a fresh AI job in the same call stack as the stop was racing the
+    -- release and left the truck standing still.
+    self._pendingReturnTrips = {}
+    -- contractId -> true: this contract's return trip already retried
+    -- once; a second validate failure gives up.
+    self._returnRetried = {}
 
     -- One-per-session flags (see _ensureMissionStartup). Reset on
     -- mission teardown so a fresh career re-arms them.
@@ -365,6 +382,8 @@ function TransportCompanyManager:_onDeleteMission()
     self.hqPlaceables = {}
     self.companies = {}
     self._lastBoardSnapshot = {}
+    self._pendingReturnTrips = {}
+    self._returnRetried = {}
     self.isMissionStarted = false
     self.isMissionLoaded = false
     self._startupRan = false
@@ -1082,6 +1101,19 @@ function TransportCompanyManager:update(dt)
                 company.wageTimer = 0
                 self:_payWeeklyWages(company)
             end
+        end
+    end
+
+    -- Fire deferred return-to-HQ trips once their delay elapses. The
+    -- delay is so the finished AI job's agent release fully completes
+    -- before the GOTO starts (starting it synchronously inside the
+    -- AI_JOB_STOPPED handler left the truck standing still).
+    for i = #self._pendingReturnTrips, 1, -1 do
+        local trip = self._pendingReturnTrips[i]
+        trip.timer = trip.timer - dt
+        if trip.timer <= 0 then
+            table.remove(self._pendingReturnTrips, i)
+            self:_dispatchReturnToHq(trip.company, trip.contract)
         end
     end
 end
@@ -2106,7 +2138,9 @@ function TransportCompanyManager:_onAIServerJobStopped(job, aiMessage)
                     self:_completeHiredDriverContract(company, contract, job)
                     -- The truck is free now: send it back to park at the
                     -- HQ instead of leaving it stranded at the delivery.
-                    self:_dispatchReturnToHq(company, contract)
+                    -- Deferred a couple of seconds so the finished job's
+                    -- agent release is complete before the GOTO starts.
+                    self:_queueReturnToHq(company, contract)
                     break
                 end
             end
@@ -2157,16 +2191,33 @@ function TransportCompanyManager:_completeHiredDriverContract(company, contract,
 end
 
 ---Send the truck that just finished a hired-driver contract back to
----park in front of the company HQ. Called from the AI job success path,
----so the vehicle is guaranteed free. A no-op when the HQ is gone, the
----truck was sold, or the truck is not AI-capable. Never blocks the
----completion that triggered it.
+---park in front of the company HQ. The GOTO job is started a couple of
+---seconds after the AI job it follows reports success (not synchronously
+---inside the AI_JOB_STOPPED handler), so the old job's agent release
+---fully completes first. A no-op when the HQ is gone, the truck was
+---sold, or the truck is not AI-capable. Never blocks the completion that
+---triggered it.
+---@param company TransportCompanyCompany
+---@param contract TransportCompanyContract
+function TransportCompanyManager:_queueReturnToHq(company, contract)
+    if not self.isServer then return end
+    if company == nil or contract == nil then return end
+    if not contract.isHiredDriver then return end
+
+    table.insert(self._pendingReturnTrips, {
+        company = company,
+        contract = contract,
+        timer = TransportCompanyManager.RETURN_DISPATCH_DELAY_MS,
+    })
+end
+
+---Start the deferred return trip for a contract. Called from update()
+---once the queue timer elapses.
 ---@param company TransportCompanyCompany
 ---@param contract TransportCompanyContract
 function TransportCompanyManager:_dispatchReturnToHq(company, contract)
     if not self.isServer then return end
     if company == nil or contract == nil then return end
-    if not contract.isHiredDriver then return end
 
     local truck = company.trucks[contract.acceptedTruckUniqueId]
     if truck == nil then return end
@@ -2194,6 +2245,18 @@ function TransportCompanyManager:_dispatchReturnToHq(company, contract)
 
         local isValid, errorMessage = job:validate(company.farmId)
         if not isValid then
+            -- A parking spot the AI cannot reach (against a wall, a
+            -- fence, another building) would leave the truck standing
+            -- still forever. Retry once after a longer delay so the
+            -- map's AI has a moment to settle, then give up.
+            if not self._returnRetried[contract.contractId] then
+                self._returnRetried[contract.contractId] = true
+                table.insert(self._pendingReturnTrips, {
+                    company = company,
+                    contract = contract,
+                    timer = TransportCompanyManager.RETURN_RETRY_DELAY_MS,
+                })
+            end
             TransportCompanyLog.debug(
                 "return-to-HQ validate failed for %s: %s",
                 tostring(truck.vehicleName or truck.uniqueId), tostring(errorMessage)

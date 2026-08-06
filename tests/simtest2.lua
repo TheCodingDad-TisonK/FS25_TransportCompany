@@ -30,7 +30,7 @@ g_currentMission = {
   end,
   addIngameNotification = function() end,
   getFarmId = function() return 1 end,
-  vehicleSystem = { vehicleByUniqueId = {} },
+  vehicleSystem = { vehicleByUniqueId = {}, vehicles = {} },
 }
 FSBaseMission = { INGAME_NOTIFICATION_OK = {} }
 g_i18n = { getText=function(_,k) return k end,
@@ -226,6 +226,7 @@ g_currentMission.aiJobTypeManager = {
 AIJobType = { GOTO = 9, LOAD_AND_DELIVER = 5 }
 g_currentMission.aiSystem = {
     startJob = function(_, job) table.insert(startedJobs, job) end,
+    getJobById = function() return nil end,
 }
 g_currentMission.placeableSystem = {}
 
@@ -254,9 +255,17 @@ retContract.isHiredDriver = true
 retContract.acceptedTruckUniqueId = "vehicleRet"
 retContract.hiredDriverJobId = 77
 
+-- The return trip is QUEUED on success, then fired by update() after
+-- the delay (so the finished AI job's agent release completes first).
 startedJobs = {}
-mgr:_dispatchReturnToHq(comp, retContract)
-ok(#startedJobs == 1, "a GOTO job is started", #startedJobs)
+mgr:_queueReturnToHq(comp, retContract)
+ok(#mgr._pendingReturnTrips == 1, "return trip is queued, not fired inline", #mgr._pendingReturnTrips)
+ok(#startedJobs == 0, "no GOTO job started before the delay")
+mgr:update(TransportCompanyManager.RETURN_DISPATCH_DELAY_MS - 1)
+ok(#startedJobs == 0, "still no GOTO before the delay elapses")
+mgr:update(2)
+ok(#startedJobs == 1, "GOTO job starts after the delay", #startedJobs)
+ok(#mgr._pendingReturnTrips == 0, "queue drained after firing")
 if startedJobs[1] ~= nil then
     ok(startedJobs[1].jobType == AIJobType.GOTO, "job is a GOTO, not load-and-deliver",
        startedJobs[1].jobType)
@@ -267,23 +276,51 @@ if startedJobs[1] ~= nil then
     ok(ang ~= nil and ang ~= 0, "job carries a parking facing angle", tostring(ang))
 end
 
--- No HQ: the truck is not dispatched, and nothing errors.
+-- No HQ: the queued trip fires and does nothing, no crash.
 mgr.hqPlaceables["hq1"] = nil
 startedJobs = {}
 local noHqContract = makeContract("ret2", 1000, 1, 500, STATION_C)
 noHqContract.isHiredDriver = true
 noHqContract.acceptedTruckUniqueId = "vehicleRet"
-local okNoHq, errNoHq = pcall(function() mgr:_dispatchReturnToHq(comp, noHqContract) end)
+local okNoHq, errNoHq = pcall(function()
+    mgr:_queueReturnToHq(comp, noHqContract)
+    mgr:update(TransportCompanyManager.RETURN_DISPATCH_DELAY_MS + 1)
+end)
 ok(okNoHq and #startedJobs == 0, "no dispatch without an HQ, no crash", errNoHq)
 
--- A self-hauled contract never triggers a return trip.
+-- A self-hauled contract never queues a return trip.
 mgr.hqPlaceables["hq1"] = hq
 startedJobs = {}
 local selfContract = makeContract("ret3", 1000, 1, 500, STATION_C)
 selfContract.isHiredDriver = false
 selfContract.acceptedTruckUniqueId = "vehicleRet"
-mgr:_dispatchReturnToHq(comp, selfContract)
-ok(#startedJobs == 0, "self-hauled contract does not dispatch a return trip")
+mgr:_queueReturnToHq(comp, selfContract)
+ok(#mgr._pendingReturnTrips == 0, "self-hauled contract does not queue a return trip")
+
+-- A validate failure retries once after the longer delay, then gives up.
+g_currentMission.aiJobTypeManager.createJob = function(_, jobType)
+    return {
+        jobType = jobType,
+        vehicleParameter = { setVehicle = function() end },
+        positionAngleParameter = {
+            setPosition = function() end,
+            setAngle = function() end,
+        },
+        setValues = function() end,
+        validate = function() return false, "no route" end,
+    }
+end
+startedJobs = {}
+local failContract = makeContract("ret4", 1000, 1, 500, STATION_C)
+failContract.isHiredDriver = true
+failContract.acceptedTruckUniqueId = "vehicleRet"
+failContract.contractId = "ret4-fail"
+mgr:_queueReturnToHq(comp, failContract)
+mgr:update(TransportCompanyManager.RETURN_DISPATCH_DELAY_MS + 1)
+ok(#mgr._pendingReturnTrips == 1, "failed validate re-queues for one retry", #mgr._pendingReturnTrips)
+mgr:update(TransportCompanyManager.RETURN_RETRY_DELAY_MS + 1)
+ok(#mgr._pendingReturnTrips == 0, "no third attempt after the retry", #mgr._pendingReturnTrips)
+ok(#startedJobs == 0, "no GOTO started when validate keeps failing")
 
 print(string.format("\n%d passed, %d failed", pass, fail))
 return fail
