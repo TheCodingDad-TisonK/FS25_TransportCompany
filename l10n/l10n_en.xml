@@ -84,6 +84,8 @@
         <e k="transportCompany_settingDesc_hiredDriverRewardShare" v="Percentage of the reward a hired driver keeps. The company banks the rest."/>
         <e k="transportCompany_setting_showNotifications" v="Notifications"/>
         <e k="transportCompany_settingDesc_showNotifications" v="Show a message when a contract is accepted, delivered or expires."/>
+        <e k="transportCompany_setting_returnTruckToHq" v="Return truck to HQ"/>
+        <e k="transportCompany_settingDesc_returnTruckToHq" v="When a hired driver finishes a contract, drive the truck back to park at the HQ. Off leaves it where the job ended."/>
         <e k="transportCompany_setting_debugMode" v="Debug logging"/>
         <e k="transportCompany_settingDesc_debugMode" v="Verbose output in log.txt. Saved per player, off by default."/>
         <e k="transportCompany_hireStationEmpty" v="The pickup station has none of these goods available to your farm, so a hired driver has nothing to load. Haul it yourself, or wait for the station to restock."/>
@@ -135,6 +137,6 @@
         <e k="transportCompany_helpPageStuckTitle" v="When A Driver Gets Stuck"/>
         <e k="transportCompany_helpPageStuckBody" v="A hired driver usually recovers on its own, but on busy roads or tight farmyards it can get wedged. The mod watches for this and replans the route up to three times, then recalls the driver.\n\nIF THE TRUCK STOPS MOVING\n1. Press H to take control of the truck and stop the AI job.\n2. Drive the truck a short way out of the jam, or turn it around to face open road.\n3. Open the Dispatch tab and find the contract.\n4. Press Hire driver again. The AI replans from the truck's current position and continues the route.\n\nYou can hand any accepted job to a driver, even one you took yourself, so nothing is lost when a route goes wrong."/>
         <e k="transportCompany_helpPageSettingsTitle" v="Settings &amp; Multiplayer"/>
-        <e k="transportCompany_helpPageSettingsBody" v="The Settings tab covers the whole company:\n\nCompany enabled: master switch.\nContracts on the board: 1-12, default 5.\nDeadline (days): 1-30, default 7.\nDriver wage share: 0-100%, default 20%.\nNotifications: on/off.\nDebug logging: per player, off by default.\n\nIn multiplayer, each farm that owns an HQ runs its own company with its own board, fleet, ledger and settings. Only the server can change shared settings; debug logging is always editable."/>
+        <e k="transportCompany_helpPageSettingsBody" v="The Settings tab covers the whole company.\n\nCompany enabled: master switch.\nContracts on the board: 1-12, default 5.\nDeadline (days): 1-30, default 7.\nDriver wage share: 0-100%, default 20%.\nReturn truck to HQ: on by default; off leaves a finished truck where it ended.\nNotifications: on/off.\nDebug logging: per player, off by default.\n\nIn multiplayer, each farm that owns an HQ runs its own company with its own board, fleet, ledger and settings. Only the server can change shared settings; debug logging is always editable."/>
     </elements>
 </l10n>

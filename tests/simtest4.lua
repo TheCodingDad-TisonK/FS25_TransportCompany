@@ -65,6 +65,7 @@ function MessageDialog:setText() end
 g_gui = {
     guis = {},
     loadGui = function(_, xml, name, instance)
+        g_gui.lastXml = xml
         g_gui.guis[name] = instance
     end,
     showDialog = function(_, name)
@@ -293,6 +294,18 @@ ok(g_gui.shownName == "transportCompanyHelpDialog", "dialog opened via g_gui:sho
    tostring(g_gui.shownName))
 ok(g_transportCompanyHelpDialog ~= nil, "dialog instance cached", g_transportCompanyHelpDialog)
 ok(g_transportCompanyHelpDialog.currentPage == 1, "opens on the first page")
+ok(g_gui.lastXml == "/mods/tc/gui/TransportCompanyHelpDialog.xml",
+   "xml path built from the manager's captured mod directory", tostring(g_gui.lastXml))
+
+-- Regression: g_currentModDirectory is nil at click time (it is only
+-- valid during mod loading). The dialog must use the directory the
+-- manager captured at load, never read the global on open.
+g_currentModDirectory = nil
+g_transportCompanyHelpDialog = nil
+local okShow, errShow = pcall(TransportCompanyHelpDialog.show)
+ok(okShow, "help dialog opens without g_currentModDirectory set", errShow)
+ok(g_gui.shownName == "transportCompanyHelpDialog", "still opens with nil g_currentModDirectory",
+   tostring(g_gui.shownName))
 
 print(string.format("\n%d passed, %d failed", pass, fail))
 return fail

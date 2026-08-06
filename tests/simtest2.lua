@@ -327,6 +327,19 @@ selfContract.acceptedTruckUniqueId = "vehicleRet"
 mgr:_queueReturnToHq(comp, selfContract)
 ok(#mgr._pendingReturnTrips == 0, "self-hauled contract does not queue a return trip")
 
+-- The Return truck to HQ setting off disables the trip entirely.
+startedJobs = {}
+comp.settings:set("returnTruckToHq", false)
+local offContract = makeContract("retOff", 1000, 1, 500, STATION_C)
+offContract.isHiredDriver = true
+offContract.acceptedTruckUniqueId = "vehicleRet"
+mgr:_queueReturnToHq(comp, offContract)
+ok(#mgr._pendingReturnTrips == 0, "return trip disabled by the setting")
+comp.settings:set("returnTruckToHq", true)
+mgr:_queueReturnToHq(comp, offContract)
+ok(#mgr._pendingReturnTrips == 1, "return trip re-enabled when the setting is on")
+mgr._pendingReturnTrips = {}
+
 -- A validate failure retries once after the longer delay, then gives up.
 g_currentMission.aiJobTypeManager.createJob = function(_, jobType)
     return {

@@ -2205,6 +2205,11 @@ function TransportCompanyManager:_queueReturnToHq(company, contract)
     if not self.isServer then return end
     if company == nil or contract == nil then return end
     if not contract.isHiredDriver then return end
+    -- The player can turn the return trip off: the truck then stays
+    -- where the job ended instead of burning fuel/time driving home.
+    if company.settings:get("returnTruckToHq") == false then
+        return
+    end
 
     table.insert(self._pendingReturnTrips, {
         company = company,

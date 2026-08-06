@@ -110,9 +110,18 @@ end
 function TransportCompanyHelpDialog.show()
     if g_gui == nil then return end
     if g_transportCompanyHelpDialog == nil then
+        -- The mod directory is captured by the manager at load time.
+        -- g_currentModDirectory is only valid during mod loading, so it
+        -- must not be read here (that nil concatenation crashed the
+        -- dialog's first open).
+        local modDir = TransportCompanyManager.MOD_DIRECTORY
+        if modDir == nil then
+            TransportCompanyLog.error("Help dialog: no mod directory available")
+            return
+        end
         local instance = TransportCompanyHelpDialog.new()
         g_gui:loadGui(
-            g_currentModDirectory .. "gui/TransportCompanyHelpDialog.xml",
+            modDir .. "gui/TransportCompanyHelpDialog.xml",
             "transportCompanyHelpDialog",
             instance
         )
