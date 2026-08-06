@@ -14,6 +14,13 @@
         <e k="transportCompany_contractPallets" v="Pallets"/>
         <e k="transportCompany_contractReward" v="Reward"/>
         <e k="transportCompany_contractDeadline" v="Deadline"/>
+        <e k="transportCompany_contractTier" v="Priority"/>
+        <e k="transportCompany_contractDistance" v="Distance"/>
+        <e k="transportCompany_contractEstFuel" v="Est. fuel cost"/>
+        <e k="transportCompany_contractEstProfit" v="Est. profit"/>
+        <e k="transportCompany_tierStandard" v="Standard"/>
+        <e k="transportCompany_tierUrgent" v="Urgent"/>
+        <e k="transportCompany_tierBulk" v="Bulk"/>
         <e k="transportCompany_contractTruck" v="Assigned truck"/>
         <e k="transportCompany_contractStatus" v="Status"/>
         <e k="transportCompany_statusAvailable" v="Available"/>
@@ -89,5 +96,30 @@
         <e k="transportCompany_hireAvailable" v="Available"/>
         <e k="transportCompany_hireUnavailable" v="Not possible"/>
         <e k="transportCompany_hireReason" v="Reason"/>
+        <e k="transportCompany_tabDrivers" v="Drivers"/>
+        <e k="transportCompany_driversEmpty" v="No drivers on the payroll yet. Hire one and assign it to a truck to run your hired-driver contracts."/>
+        <e k="transportCompany_driverTitle" v="Driver"/>
+        <e k="transportCompany_driverHire" v="Hire driver"/>
+        <e k="transportCompany_driverAssign" v="Assign truck"/>
+        <e k="transportCompany_driverFire" v="Fire driver"/>
+        <e k="transportCompany_driverWage" v="Weekly wage"/>
+        <e k="transportCompany_driverExperience" v="Experience"/>
+        <e k="transportCompany_driverJobs" v="Jobs done"/>
+        <e k="transportCompany_driverAssignedTruck" v="Assigned truck"/>
+        <e k="transportCompany_driverHired" v="Hired %s for %s."/>
+        <e k="transportCompany_driverCapReached" v="Your driver cap is full. Complete contracts to raise your reputation and grow the cap."/>
+        <e k="transportCompany_hqLevel" v="Headquarters"/>
+        <e k="transportCompany_hqLevelNum" v="Reputation level"/>
+        <e k="transportCompany_hqTier" v="Tier"/>
+        <e k="transportCompany_hqUpgrade" v="Upgrade HQ"/>
+        <e k="transportCompany_hqUpgraded" v="Headquarters upgraded to tier %s for %s. Board size increased."/>
+        <e k="transportCompany_hqUpgradeCost" v="Upgrade cost"/>
+        <e k="transportCompany_hqMaxLevel" v="Headquarters already at maximum tier."/>
+        <e k="transportCompany_hqBoardSize" v="Board size"/>
+        <e k="transportCompany_hqDriverCap" v="Driver cap"/>
+        <e k="transportCompany_hqReputation" v="Reputation"/>
+        <e k="transportCompany_truckNextService" v="Next service in"/>
+        <e k="transportCompany_noMoney" v="Not enough money."/>
+        <e k="transportCompany_period" v="Week"/>
     </elements>
 </l10n>

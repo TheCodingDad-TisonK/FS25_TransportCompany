@@ -28,6 +28,7 @@ g_fillTypeManager = {
 dofile(ROOT.."/scripts/transportCompany/TransportCompanyContract.lua")
 dofile(ROOT.."/scripts/transportCompany/TransportCompanyTruck.lua")
 dofile(ROOT.."/scripts/transportCompany/TransportCompanySettings.lua")
+dofile(ROOT.."/scripts/transportCompany/TransportCompanyCompany.lua")
 dofile(ROOT.."/scripts/transportCompany/TransportCompanyManager.lua")
 
 TransportCompanyContractEvent={TYPE_ADD=1,TYPE_UPDATE=2,TYPE_STATE_CHANGE=3,TYPE_REMOVE=4,sendEvent=function() end}
@@ -39,6 +40,8 @@ local mgr=TransportCompanyManager.new("/mods/tc/","FS25_TransportCompany")
 mgr.isServer,mgr.isMissionLoaded=true,true
 mgr._regenerateContractBoard=function() end
 g_transportCompanyManager=mgr
+-- Farm 1's company holds the board and ledger.
+local comp = mgr:getOrCreateCompany(1)
 
 -- A real UnloadingStation always exposes an AI drive target
 -- (getAITargetPositionAndDirection); it returns nil only when no trigger
@@ -52,7 +55,7 @@ local function add(id)
   c.fillTypeIndex=FillType.WHEAT
   c.getDestStation=function() return DEST end
   c.getSourceStation=function() return {name="src"} end
-  mgr.contracts[id]=c; return c
+  comp.contracts[id]=c; return c
 end
 
 print("\n-- accept for self --")
@@ -85,7 +88,7 @@ ok(c3.farmId==0 and c3.isHiredDriver==false, "no residue on refused hire")
 print("\n-- accepted contract then delivers and pays --")
 mgr:onGoodsDelivered(DEST, 1, 1000, FillType.WHEAT)
 ok(c1.state==C.STATE_COMPLETED, "self-accepted contract completes on delivery")
-ok(mgr.ledger.jobs==1, "ledger counted the job", mgr.ledger.jobs)
+ok(comp.ledger.jobs==1, "ledger counted the job", comp.ledger.jobs)
 
 print("")
 print("-- hiring a driver for a job already accepted --")
@@ -118,7 +121,7 @@ local function jobWith(id, src)
     c.fillTypeIndex = FillType.WHEAT
     c.getSourceStation = function() return src end
     c.getDestStation = function() return DEST end
-    mgr.contracts[id] = c
+    comp.contracts[id] = c
     return c
 end
 
@@ -158,13 +161,14 @@ TransportCompanyBooksEvent = {
 }
 local bm = TransportCompanyManager.new("/mods/tc/", "FS25_TransportCompany")
 bm.isServer, bm.isMissionLoaded = true, true
-bm.ledger.revenue, bm.ledger.driverWages, bm.ledger.jobs = 500, 100, 4
+local bcomp = bm:getOrCreateCompany(1)
+bcomp.ledger.revenue, bcomp.ledger.driverWages, bcomp.ledger.jobs = 500, 100, 4
 local bveh = { getUniqueId = function() return "v9" end,
                getFullName = function() return "Volvo" end,
                getOwnerFarmId = function() return 1 end }
-bm.trucks["v9"] = TransportCompanyTruck.new(bveh)
-bm.trucks["v9"].fuelCost, bm.trucks["v9"].distanceM = 12, 5000
-bm:_broadcastBooks()
+bcomp.trucks["v9"] = TransportCompanyTruck.new(bveh)
+bcomp.trucks["v9"].fuelCost, bcomp.trucks["v9"].distanceM = 12, 5000
+bm:_broadcastBooks(1)
 ok(lastBooks ~= nil and lastBooks.ledgerRevenue == 500 and lastBooks.ledgerJobs == 4,
    "broadcast carries the ledger snapshot", lastBooks and lastBooks.ledgerRevenue)
 ok(lastBooks.trucks ~= nil and lastBooks.trucks[1].uniqueId == "v9"
@@ -182,10 +186,11 @@ cm:onBooksEvent({
         { uniqueId = "v1", vehicleName = "Scania", farmId = 1,
           revenue = 900, fuelCost = 50, otherCost = 20, distanceM = 10000, jobsDelivered = 2 },
     },
-})
-ok(cm.ledger.revenue == 1234 and cm.ledger.driverWages == 100 and cm.ledger.jobs == 3,
-   "client ledger synced from the snapshot", cm.ledger.revenue)
-local c1 = cm.trucks["v1"]
+}, 1)
+local ccomp = cm:getCompany(1)
+ok(ccomp ~= nil and ccomp.ledger.revenue == 1234 and ccomp.ledger.driverWages == 100 and ccomp.ledger.jobs == 3,
+   "client ledger synced from the snapshot", ccomp ~= nil and ccomp.ledger.revenue)
+local c1 = ccomp ~= nil and ccomp.trucks["v1"]
 ok(c1 ~= nil and c1.revenue == 900 and c1.fuelCost == 50 and c1.distanceM == 10000,
    "client truck books synced", c1 ~= nil and c1.distanceM)
 ok(c1 ~= nil and c1:getProfit() == 830, "placeholder truck still has methods", c1 and c1:getProfit())
@@ -195,15 +200,16 @@ MessageType = { AI_JOB_STOPPED = 1 }
 g_messageCenter = { subscribe = function() end }
 local rm = TransportCompanyManager.new("/mods/tc/", "FS25_TransportCompany")
 rm.isServer = true
-rm.settings:set("enabled", false)
+local rcomp = rm:getOrCreateCompany(1)
+rcomp.settings:set("enabled", false)
 local boardCalls = 0
 rm._regenerateContractBoard = function() boardCalls = boardCalls + 1 end
 rm:_onMissionStarted()
 ok(rm._startupRan == true, "mission setup runs even when the company starts disabled")
 ok(rm._aiSubscribed == true, "AI completion listener is subscribed from the start")
 ok(boardCalls == 0, "board is not filled while the company is disabled", boardCalls)
-rm.settings:set("enabled", true)
-rm:_regenerateContractBoard()
+rcomp.settings:set("enabled", true)
+rm:_regenerateContractBoard(1)
 ok(boardCalls == 1, "board fills when the company is turned on", boardCalls)
 
 print(string.format("\n%d passed, %d failed", pass, fail))

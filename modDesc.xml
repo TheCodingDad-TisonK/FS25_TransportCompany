@@ -11,17 +11,20 @@ Your map is already full of silos, dairies and mills moving goods between them.
 None of it pays you a penny. Buy a headquarters and it does.
 
 Buy the Transport Company HQ from the shop (Buildings > Sheds) and place it on
-your farm. The dispatch office opens in the in-game menu with four sections:
-Dispatch, Fleet, Ledger and Settings.
+your farm. The dispatch office opens in the in-game menu with five sections:
+Dispatch, Fleet, Ledger, Drivers and Settings.
 
 Freight jobs are generated from the loading and unloading stations that already
-exist on your map, priced against the live economy. Every job names its pickup,
-its drop-off, the amount, the reward and the deadline. Haul one yourself, or
+exist on your map, priced against the live economy and the route length. Every
+job names its pickup, its drop-off, the amount, the reward and the deadline,
+and comes in three tiers: Standard, Urgent and Bulk. Haul one yourself, or
 hand the route to a hired driver and let the base game AI run it.
 
 Every truck keeps its own books: distance driven, diesel burned at the live
-economy price, revenue earned, wages paid and jobs completed. The ledger keeps
-company totals and a history of every finished contract.
+economy price, revenue earned, wages paid and jobs completed - including the
+jobs you drive yourself. Run a real business: hire named drivers, pay them a
+weekly wage, grow your reputation, upgrade your headquarters, service your
+fleet and watch the weekly profit and loss in the ledger.
 
 No map preparation of any kind is required.
   ]]></en>
@@ -48,7 +51,7 @@ Es ist keinerlei Vorbereitung der Karte noetig.
   ]]></de>
     </description>
 
-    <version>1.0.1.0</version>
+    <version>1.2.0.0</version>
     <author>TisonK</author>
     <iconFilename>textures/icon_FS25_TransportCompany.dds</iconFilename>
     <multiplayer supported="true"/>
@@ -73,10 +76,13 @@ Es ist keinerlei Vorbereitung der Karte noetig.
         <sourceFile filename="scripts/transportCompany/TransportCompanySettings.lua"/>
         <sourceFile filename="scripts/transportCompany/TransportCompanyContract.lua"/>
         <sourceFile filename="scripts/transportCompany/TransportCompanyTruck.lua"/>
+        <sourceFile filename="scripts/transportCompany/TransportCompanyDriver.lua"/>
+        <sourceFile filename="scripts/transportCompany/TransportCompanyCompany.lua"/>
         <sourceFile filename="scripts/transportCompany/events/TransportCompanyContractEvent.lua"/>
         <sourceFile filename="scripts/transportCompany/events/TransportCompanyMoneyEvent.lua"/>
         <sourceFile filename="scripts/transportCompany/events/TransportCompanyBooksEvent.lua"/>
         <sourceFile filename="scripts/transportCompany/events/TransportCompanyAcceptEvent.lua"/>
+        <sourceFile filename="scripts/transportCompany/events/TransportCompanyDriverEvent.lua"/>
         <sourceFile filename="scripts/transportCompany/TransportCompanyManager.lua"/>
         <sourceFile filename="scripts/gui/InGameMenuTransportCompanyFrame.lua"/>
         <sourceFile filename="scripts/TransportCompany.lua"/>

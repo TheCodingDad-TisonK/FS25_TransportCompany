@@ -43,10 +43,28 @@ TransportCompanyContract.STATE_EXPIRED = 4
 -- Day length in ms (base game: 86400000).
 TransportCompanyContract.DAY_LENGTH = 86400000
 
--- Base reward curve (kept conservative, tuned by the manager via
--- economy prices; these are fallbacks when no price exists).
+-- Base reward curve. The bulk reward is distance-driven: goods value
+-- and a per-meter haul component. RATE_PER_METER is calibrated so the
+-- 1.0-era reward (amount × price × 0.15) is the low band and a long
+-- haul pays meaningfully more than a short one. The base game's own
+-- TransportMission pays REWARD_PER_METER=0.5, but its exact call is
+-- not in the reference set; straight-line distance is the documented
+-- proxy (calcDistanceFrom, Node.md), so the rate is tuned in-game.
+-- A truck burns roughly EST_FUEL_L_PER_KM on a loaded run; that feed
+-- is only an estimate for the PDA economics panel, never a charge.
 TransportCompanyContract.REWARD_PER_LITER = 0.005
 TransportCompanyContract.REWARD_PER_OBJECT = 350
+TransportCompanyContract.RATE_PER_METER = 0.2
+TransportCompanyContract.PALLET_PRICE_FACTOR = 0.8
+TransportCompanyContract.EST_FUEL_L_PER_KM = 0.4
+TransportCompanyContract.MIN_ROUTE_DISTANCE_M = 50
+TransportCompanyContract.MAX_TRIPS_PER_JOB = 3
+
+-- Difficulty tiers. Standard is the default; URGENT pays more for a
+-- shorter deadline; BULK moves more volume for a tighter margin.
+TransportCompanyContract.CONTRACT_TIER_STANDARD = 1
+TransportCompanyContract.CONTRACT_TIER_URGENT = 2
+TransportCompanyContract.CONTRACT_TIER_BULK = 3
 
 -- Delivery is always measured in LITERS, because that is the only
 -- quantity the engine reports at a station
@@ -62,7 +80,7 @@ TransportCompanyContract.LITERS_PER_PALLET = 1000
 -- dropped on load rather than sitting on the board failing forever:
 -- before this existed, a save carried five jobs whose source stations
 -- could not supply them, and every hire attempt was refused.
-TransportCompanyContract.GENERATOR_VERSION = 2
+TransportCompanyContract.GENERATOR_VERSION = 3
 
 ---@class TransportCompanyContract
 TransportCompanyContract_mt = Class(TransportCompanyContract)
@@ -71,12 +89,14 @@ function TransportCompanyContract.new()
     local self = setmetatable({}, TransportCompanyContract_mt)
     self.contractId = nil
     self.contractType = TransportCompanyContract.CONTRACT_TYPE_BULK
+    self.tier = TransportCompanyContract.CONTRACT_TIER_STANDARD
     self.state = TransportCompanyContract.STATE_AVAILABLE
     self.fillTypeIndex = nil
     self.amount = 0              -- liters (BULK) or pallets (PALLET)
     self.delivered = 0           -- same unit as amount
     self.litersPerUnit = 1       -- 1 for BULK, LITERS_PER_PALLET for PALLET
     self.reward = 0              -- total reward on completion
+    self.routeDistanceM = 0      -- straight-line source→dest distance
     -- Source station reference: placeable uniqueId + station index
     -- (matches AIParameterLoadingStation persistence: owningPlaceable
     -- uniqueId + getPlaceableLoadingStationIndex, see
@@ -111,12 +131,14 @@ end
 function TransportCompanyContract:writeStream(streamId, connection)
     streamWriteString(streamId, self.contractId or "")
     streamWriteInt8(streamId, self.contractType)
+    streamWriteInt8(streamId, self.tier or TransportCompanyContract.CONTRACT_TIER_STANDARD)
     streamWriteInt8(streamId, self.state)
     streamWriteInt16(streamId, self.fillTypeIndex or FillType.UNKNOWN)
     streamWriteFloat32(streamId, self.amount)
     streamWriteFloat32(streamId, self.delivered)
     streamWriteFloat32(streamId, self.reward)
     streamWriteFloat32(streamId, self.litersPerUnit or 1)
+    streamWriteFloat32(streamId, self.routeDistanceM or 0)
     streamWriteString(streamId, self.sourceUniqueId or "")
     streamWriteInt16(streamId, self.sourceStationIndex or 0)
     streamWriteString(streamId, self.sourceName or "")
@@ -136,12 +158,14 @@ end
 function TransportCompanyContract:readStream(streamId, connection)
     self.contractId = streamReadString(streamId)
     self.contractType = streamReadInt8(streamId)
+    self.tier = streamReadInt8(streamId)
     self.state = streamReadInt8(streamId)
     self.fillTypeIndex = streamReadInt16(streamId)
     self.amount = streamReadFloat32(streamId)
     self.delivered = streamReadFloat32(streamId)
     self.reward = streamReadFloat32(streamId)
     self.litersPerUnit = streamReadFloat32(streamId)
+    self.routeDistanceM = streamReadFloat32(streamId)
     self.sourceUniqueId = streamReadString(streamId)
     self.sourceStationIndex = streamReadInt16(streamId)
     self.sourceName = streamReadString(streamId)
@@ -160,12 +184,14 @@ end
 function TransportCompanyContract:saveToXMLFile(xmlFile, key)
     xmlFile:setString(key .. "#contractId", self.contractId or "")
     xmlFile:setInt(key .. "#contractType", self.contractType)
+    xmlFile:setInt(key .. "#tier", self.tier or TransportCompanyContract.CONTRACT_TIER_STANDARD)
     xmlFile:setInt(key .. "#state", self.state)
     xmlFile:setInt(key .. "#fillTypeIndex", self.fillTypeIndex or FillType.UNKNOWN)
     xmlFile:setFloat(key .. "#amount", self.amount)
     xmlFile:setFloat(key .. "#delivered", self.delivered)
     xmlFile:setFloat(key .. "#reward", self.reward)
     xmlFile:setFloat(key .. "#litersPerUnit", self.litersPerUnit or 1)
+    xmlFile:setFloat(key .. "#routeDistanceM", self.routeDistanceM or 0)
     xmlFile:setString(key .. "#sourceUniqueId", self.sourceUniqueId or "")
     xmlFile:setInt(key .. "#sourceStationIndex", self.sourceStationIndex or 0)
     xmlFile:setString(key .. "#sourceName", self.sourceName or "")
@@ -186,12 +212,14 @@ end
 function TransportCompanyContract:loadFromXMLFile(xmlFile, key)
     self.contractId = xmlFile:getString(key .. "#contractId")
     self.contractType = xmlFile:getInt(key .. "#contractType", TransportCompanyContract.CONTRACT_TYPE_BULK)
+    self.tier = xmlFile:getInt(key .. "#tier", TransportCompanyContract.CONTRACT_TIER_STANDARD)
     self.state = xmlFile:getInt(key .. "#state", TransportCompanyContract.STATE_AVAILABLE)
     self.fillTypeIndex = xmlFile:getInt(key .. "#fillTypeIndex", FillType.UNKNOWN)
     self.amount = xmlFile:getFloat(key .. "#amount", 0)
     self.delivered = xmlFile:getFloat(key .. "#delivered", 0)
     self.reward = xmlFile:getFloat(key .. "#reward", 0)
     self.litersPerUnit = xmlFile:getFloat(key .. "#litersPerUnit", 1)
+    self.routeDistanceM = xmlFile:getFloat(key .. "#routeDistanceM", 0)
     self.sourceUniqueId = xmlFile:getString(key .. "#sourceUniqueId")
     self.sourceStationIndex = xmlFile:getInt(key .. "#sourceStationIndex", 1)
     self.sourceName = xmlFile:getString(key .. "#sourceName", "")
@@ -680,7 +708,8 @@ function TransportCompanyContract.generate(deadlineDays, farmId)
 
     -- Find a destination station that accepts this fill type.
     -- Same placeable-ownership requirement as the source, and never
-    -- route a load back into the station it was collected from.
+    -- route a load back into the station it was collected from, or to
+    -- one so close the job is a pointless shuffle (MIN_ROUTE_DISTANCE_M).
     -- Split the destinations the same way as the sources. Picking an
     -- AI-capable source and then pairing it with any old destination is
     -- what let a job pass every check, dispatch a driver, and only then
@@ -690,22 +719,30 @@ function TransportCompanyContract.generate(deadlineDays, farmId)
         if station ~= nil and station.owningPlaceable ~= nil
            and station.owningPlaceable ~= source.station.owningPlaceable
            and station:getIsFillTypeSupported(contract.fillTypeIndex) then
-            local entry = {
-                ["station"] = station,
-                ["name"] = station:getName(),
-            }
-            table.insert(destCandidates, entry)
+            -- Route distance drives the reward, so it is measured at
+            -- generation time (straight-line proxy, see RATE_PER_METER).
+            local distanceM = TransportCompanyContract.getRouteDistanceM(
+                source.station.owningPlaceable, station.owningPlaceable
+            )
+            if distanceM >= TransportCompanyContract.MIN_ROUTE_DISTANCE_M then
+                local entry = {
+                    ["station"] = station,
+                    ["name"] = station:getName(),
+                    ["distanceM"] = distanceM,
+                }
+                table.insert(destCandidates, entry)
 
-            -- Exactly what AIParameterUnloadingStation:validate applies,
-            -- plus a target the driver can actually reach.
-            local aiOk =
-                (station.getIsFillTypeAISupported == nil
-                 or station:getIsFillTypeAISupported(contract.fillTypeIndex))
-                and (station.getFreeCapacity == nil
-                     or (station:getFreeCapacity(contract.fillTypeIndex, farmId) or 0) > 0)
-                and TransportCompanyContract.getHasAiTarget(station, contract.fillTypeIndex)
-            if aiOk then
-                table.insert(aiDests, entry)
+                -- Exactly what AIParameterUnloadingStation:validate applies,
+                -- plus a target the driver can actually reach.
+                local aiOk =
+                    (station.getIsFillTypeAISupported == nil
+                     or station:getIsFillTypeAISupported(contract.fillTypeIndex))
+                    and (station.getFreeCapacity == nil
+                         or (station:getFreeCapacity(contract.fillTypeIndex, farmId) or 0) > 0)
+                    and TransportCompanyContract.getHasAiTarget(station, contract.fillTypeIndex)
+                if aiOk then
+                    table.insert(aiDests, entry)
+                end
             end
         end
     end
@@ -721,21 +758,40 @@ function TransportCompanyContract.generate(deadlineDays, farmId)
         destPool = aiDests
     end
 
-    local dest = destPool[math.random(1, #destPool)]
+    -- Pick a destination. Prefer longer routes: longer hauls are worth
+    -- more, so among a few random candidates we take the farthest. That
+    -- biases the board toward meaty jobs without ever forcing one.
+    local dest = TransportCompanyContract.pickFarthest(destPool)
     contract.destName = dest.name or ""
+    contract.routeDistanceM = dest.distanceM or 0
     local destPlaceable = dest.station.owningPlaceable
     if destPlaceable ~= nil then
         contract.destUniqueId = destPlaceable:getUniqueId()
         contract.destStationIndex = storageSystem:getPlaceableUnloadingStationIndex(destPlaceable, dest.station)
     end
 
+    -- Difficulty tier: Standard by default, URGENT pays more for a
+    -- shorter deadline, BULK moves more volume for a tighter margin.
+    local roll = math.random()
+    if roll < 0.2 then
+        contract.tier = TransportCompanyContract.CONTRACT_TIER_URGENT
+    elseif roll < 0.4 then
+        contract.tier = TransportCompanyContract.CONTRACT_TIER_BULK
+    end
+
     -- Amount + reward: scale with the base economy price so high-value
-    -- goods pay more. Fall back to constants when no price is found.
+    -- goods pay more, and with the route length so long hauls pay more.
+    -- Fall back to a conservative price when none is found.
     local economy = g_currentMission.economyManager
     local pricePerLiter = economy:getPricePerLiter(contract.fillTypeIndex)
     if pricePerLiter == nil or pricePerLiter <= 0 then
         pricePerLiter = 0.05
     end
+
+    -- How much the farm's biggest rig can move in one trip. A job must
+    -- never ask for more than a few trips' worth, or a player with a
+    -- small trailer is handed an impossible one-trip contract.
+    local maxTripCapacity = TransportCompanyContract.getMaxTripCapacity(farmId)
 
     -- Cap the ask at what the source holds, but only when it reports a
     -- stock level at all. A station that models no storage reports 0,
@@ -743,31 +799,55 @@ function TransportCompanyContract.generate(deadlineDays, farmId)
     local available = source.available or 0
     local knowsStock = available > 0
 
+    local tierRewardFactor = 1
+    local tierAmountFactor = 1
+    if contract.tier == TransportCompanyContract.CONTRACT_TIER_URGENT then
+        tierRewardFactor = 1.5
+    elseif contract.tier == TransportCompanyContract.CONTRACT_TIER_BULK then
+        tierAmountFactor = 1.5
+        tierRewardFactor = 0.85
+    end
+
     if contract.contractType == TransportCompanyContract.CONTRACT_TYPE_PALLET then
         -- Pallet contract: counted in pallets, delivered in liters.
-        -- REWARD_PER_OBJECT mirrors TransportMission.
+        -- Reward is the per-object base scaled by the live price, so a
+        -- pallet of gold pays more than a pallet of flour.
         local amount = math.random(4, 12)
         if knowsStock then
             amount = math.min(amount,
                 math.floor(available / TransportCompanyContract.LITERS_PER_PALLET))
         end
+        -- The biggest rig can carry at most MAX_TRIPS_PER_JOB loads.
+        if maxTripCapacity > 0 then
+            amount = math.min(amount, math.floor(
+                maxTripCapacity * TransportCompanyContract.MAX_TRIPS_PER_JOB
+                / TransportCompanyContract.LITERS_PER_PALLET))
+        end
         if amount < 1 then
             return nil
         end
-        contract.amount = amount
+        contract.amount = math.max(1, math.floor(amount * tierAmountFactor))
         contract.litersPerUnit = TransportCompanyContract.LITERS_PER_PALLET
-        contract.reward = amount * TransportCompanyContract.REWARD_PER_OBJECT
+        contract.reward = TransportCompanyContract.computePalletReward(
+            contract.amount, pricePerLiter, contract.tier)
     else
         local amount = math.random(8000, 24000)
         if knowsStock then
             amount = math.min(amount, math.floor(available))
         end
+        -- Never more than a few trips with the biggest rig.
+        if maxTripCapacity > 0 then
+            amount = math.min(amount,
+                math.floor(maxTripCapacity * TransportCompanyContract.MAX_TRIPS_PER_JOB))
+        end
         if amount < TransportCompanyContract.MIN_SOURCE_LITERS then
             return nil
         end
-        contract.amount = amount
+        contract.amount = math.max(TransportCompanyContract.MIN_SOURCE_LITERS,
+            math.floor(amount * tierAmountFactor))
         contract.litersPerUnit = 1
-        contract.reward = math.floor(amount * pricePerLiter * 0.15)
+        contract.reward = TransportCompanyContract.computeBulkReward(
+            contract.amount, pricePerLiter, contract.routeDistanceM, contract.tier)
     end
 
     -- Unique id: time-based + random suffix (no os.time on FS).
@@ -775,12 +855,144 @@ function TransportCompanyContract.generate(deadlineDays, farmId)
 
     -- Deadline from the configured contractDeadlineDays setting; the
     -- base TransportMission uses ~3.2 game days as its own reference.
+    -- Urgent jobs run on half the clock (never less than a day).
+    local deadlineDays = deadlineDays or 3
+    if contract.tier == TransportCompanyContract.CONTRACT_TIER_URGENT then
+        deadlineDays = math.max(1, math.ceil(deadlineDays * 0.5))
+    end
     contract.deadline = g_currentMission.time
-        + TransportCompanyContract.DAY_LENGTH * (deadlineDays or 3)
+        + TransportCompanyContract.DAY_LENGTH * deadlineDays
 
     -- A contract nobody can resolve is worse than no contract at all.
     if not contract:_resolveStationRefs() then
         return nil
     end
     return contract
+end
+
+---Straight-line distance between two owning placeables (m). The
+---documented proxy for road length: the FS25 reference set exposes no
+---path-length API, and the base game's own TransportMission distance
+---call is not in the references.
+---@param sourcePlaceable table|nil
+---@param destPlaceable table|nil
+---@return number meters
+function TransportCompanyContract.getRouteDistanceM(sourcePlaceable, destPlaceable)
+    if sourcePlaceable == nil or destPlaceable == nil
+       or sourcePlaceable.rootNode == nil or destPlaceable.rootNode == nil then
+        return 0
+    end
+    return calcDistanceFrom(sourcePlaceable.rootNode, destPlaceable.rootNode) or 0
+end
+
+---Pick the farthest of a few random candidates from a pool. Prefers
+---longer routes (worth more) while keeping the board varied.
+---@param pool table List of entries carrying a distanceM field
+---@return table entry
+function TransportCompanyContract.pickFarthest(pool)
+    local samples = math.min(3, #pool)
+    local best, bestDistance = pool[1], -1
+    for i = 1, samples do
+        local entry = pool[math.random(1, #pool)]
+        local d = entry.distanceM or 0
+        if d > bestDistance then
+            best, bestDistance = entry, d
+        end
+    end
+    return best
+end
+
+---Bulk contract reward: goods value plus a per-meter haul component,
+---scaled by the tier. Exposed as a pure function so the reward curve
+---is unit-testable without a world.
+---@param amount number Liters
+---@param pricePerLiter number
+---@param distanceM number
+---@param tier number CONTRACT_TIER_*
+---@return number reward
+function TransportCompanyContract.computeBulkReward(amount, pricePerLiter, distanceM, tier)
+    local tierRewardFactor = TransportCompanyContract.getTierRewardFactor(tier)
+    local goodsReward = amount * (pricePerLiter or 0.05) * 0.15
+    local haulReward = (distanceM or 0) * TransportCompanyContract.RATE_PER_METER
+    return math.floor((goodsReward + haulReward) * tierRewardFactor)
+end
+
+---Pallet contract reward: per-object base scaled by the live price and
+---the tier. Pure function for the same reason as computeBulkReward.
+---@param amount number Pallets
+---@param pricePerLiter number
+---@param tier number CONTRACT_TIER_*
+---@return number reward
+function TransportCompanyContract.computePalletReward(amount, pricePerLiter, tier)
+    local tierRewardFactor = TransportCompanyContract.getTierRewardFactor(tier)
+    local priceFactor = 0.5 + (pricePerLiter or 0.05) * TransportCompanyContract.PALLET_PRICE_FACTOR
+    return math.floor(amount * TransportCompanyContract.REWARD_PER_OBJECT
+        * priceFactor * tierRewardFactor)
+end
+
+---Reward multiplier for a difficulty tier.
+---@param tier number CONTRACT_TIER_*
+---@return number
+function TransportCompanyContract.getTierRewardFactor(tier)
+    if tier == TransportCompanyContract.CONTRACT_TIER_URGENT then
+        return 1.5
+    elseif tier == TransportCompanyContract.CONTRACT_TIER_BULK then
+        return 0.85
+    end
+    return 1
+end
+
+---Largest AI hauling capacity available to a farm across all its trucks
+---(truck + attached trailers), in liters. 0 when the farm owns no truck
+---or no fill capacity is readable. Used to size contracts so no job
+---needs more than MAX_TRIPS_PER_JOB loads with the biggest rig.
+---@param farmId number
+---@return number liters
+function TransportCompanyContract.getMaxTripCapacity(farmId)
+    if farmId == nil or farmId <= 0 then return 0 end
+    if g_currentMission == nil or g_currentMission.vehicleSystem == nil then return 0 end
+
+    local best = 0
+    for _, vehicle in pairs(g_currentMission.vehicleSystem.vehicles) do
+        if vehicle ~= nil and not vehicle:getIsBeingDeleted()
+           and vehicle.spec_motorized ~= nil
+           and vehicle.spec_motorized.statsType == "truck"
+           and vehicle:getOwnerFarmId() == farmId then
+            local cap = TransportCompanyContract.getVehicleAiCapacity(vehicle)
+            if cap > best then best = cap end
+        end
+    end
+    return best
+end
+
+---Sum the AI fill-unit capacities of a vehicle and its attached
+---trailers (the load the base game AI can actually move in one run).
+---Mirrors AIJobLoadAndDeliver: vehicle:getAIFillUnits plus each child
+---vehicle's (AIJobLoadAndDeliver.lua:242-253).
+---@param vehicle table
+---@return number liters
+function TransportCompanyContract.getVehicleAiCapacity(vehicle)
+    if vehicle == nil then return 0 end
+
+    local total = 0
+    local function addFor(v)
+        if v.getAIFillUnits ~= nil then
+            local units = v:getAIFillUnits()
+            if units ~= nil then
+                for _, fillUnit in ipairs(units) do
+                    if fillUnit.capacity ~= nil then
+                        total = total + fillUnit.capacity
+                    end
+                end
+            end
+        end
+    end
+
+    addFor(vehicle)
+    if vehicle.getChildVehicles ~= nil then
+        for _, child in ipairs(vehicle:getChildVehicles() or {}) do
+            addFor(child)
+        end
+    end
+    return total
 end

@@ -34,7 +34,7 @@ Then run the **GIANTS TestRunner** on the same zip. It is the authority;
 |---|---|
 | **Mod name** | Transport Company |
 | **Zip filename** | `FS25_TransportCompany.zip` |
-| **Version** | 1.0.1.0 |
+| **Version** | 1.2.0.0 |
 | **Author** | TisonK |
 | **Platform** | PC / Mac |
 | **Category** | Gameplay / Placeables |
@@ -57,17 +57,21 @@ Your map is already full of silos, dairies and mills moving goods between them.
 None of it pays you a penny. Buy a headquarters and it does.
 
 Buy the Transport Company HQ from the shop (Buildings > Sheds) and place it on
-your farm. The dispatch office opens in the in-game menu with four sections:
+your farm. The dispatch office opens in the in-game menu with five sections:
 
 DISPATCH
 Freight jobs generated from the loading and unloading stations that already
-exist on your map, priced against the live economy. Every job names its pickup,
-its drop-off, the amount, the reward and the deadline. Bulk freight is measured
-in liters, pallet freight in pallets.
+exist on your map, priced against the live economy and the route length. A
+long haul pays more than a short one for the same goods. Every job names its
+pickup, its drop-off, the amount, the reward and the deadline. Bulk freight is
+measured in liters, pallet freight in pallets. Jobs come in three tiers:
+Standard, Urgent (shorter deadline, higher pay) and Bulk (more volume).
 
 Accept a job and haul it yourself: load at the pickup, tip at the destination,
 and watch the progress bar move as you unload. Deliver more than a contract
 needs and the surplus rolls onto your next open job rather than being wasted.
+The detail panel shows the route distance and the estimated fuel cost and
+profit before you accept.
 
 Or hire a driver and hand the route to the base game AI as a Load & Deliver
 job. Changed your mind? A job you accepted for yourself can still be handed to
@@ -76,14 +80,24 @@ a driver later.
 FLEET
 Every truck keeps its own books: distance driven, diesel burned valued at the
 live economy price, revenue earned, driver wages paid and jobs completed.
-Trucks enrol themselves as soon as you buy them.
+Jobs you haul yourself are credited to the truck that tipped, alongside
+hired-driver runs. Trucks enrol themselves as soon as you buy them, and the
+Fleet tab tells you when a truck is due its next service.
+
+DRIVERS
+Hire named drivers, assign them to trucks and watch their experience grow with
+every completed contract. They are paid a weekly wage out of the farm balance.
+Your reputation — earned by delivering on time — decides how many drivers you
+may employ, and upgrading the headquarters raises it further.
 
 LEDGER
-Company totals plus a history of every finished and expired contract.
+Company totals plus a history of every finished and expired contract, and a
+rolling weekly profit and loss so you can see the company trending.
 
 SETTINGS
 Board size, deadline, driver wage share and notifications, all editable in
-game. In multiplayer only the host can change them.
+game. In multiplayer each farm that owns an HQ runs its own company with its
+own settings; only the host can change them.
 
 Everything uses stock FS25 behaviour: the base AI, the base finance system,
 base menu widgets, savegame persistence and multiplayer.
@@ -150,6 +164,38 @@ erfasst. Viele Fahrzeuge gelten als Traktor und erscheinen nicht.
 ## 4. Changelog
 
 ```
+v1.2.0.0
+- Complete overhaul. Freight dispatch is now a real business.
+- Per-farm companies: in multiplayer, every farm that owns an HQ runs its
+  own dispatch board, its own fleet and its own ledger, each with its own
+  board size, deadline, wage share and notification settings. Saved games
+  are stored per farm and upgrade in place from 1.x saves.
+- Rewards are distance-driven: a long haul pays more than a short one for
+  the same goods, on top of the goods value. Pallet contracts are priced
+  against the live economy, and contracts are sized to your fleet, so no
+  job ever asks for more than a few loads of your biggest truck and trailer.
+- Jobs come in three tiers: Standard, Urgent (shorter deadline, higher pay)
+  and Bulk (more volume, tighter margin). Routes shorter than a pointless
+  shuffle are not offered.
+- The dispatch detail panel shows distance, estimated fuel cost and
+  estimated profit before you accept.
+- Deliveries you haul yourself are credited to the truck that tipped, so the
+  Fleet tab shows revenue and job counts for your own driving too, not just
+  hired-driver runs.
+- Run a business: hire named drivers with weekly wages and growing
+  experience, assign them to trucks, and grow your reputation by delivering
+  on time. Upgrade your headquarters for a bigger board and more driver
+  capacity, and service your trucks every 5000 km.
+- The ledger shows a rolling weekly profit and loss.
+
+v1.0.1.0
+- Hired drivers can now be stopped and reassigned from the dispatch office
+- A driver stuck in traffic or against an object is watched and its route is
+  replanned automatically up to three times before it is recalled
+- Jobs are only offered to hired drivers when both ends of the route really
+  support AI loading and unloading, so a dispatch no longer fails after the
+  driver is already rolling
+
 v1.0.1.0
 - Hired drivers can now be stopped and reassigned from the dispatch office
 - A driver stuck in traffic or against an object is watched and its route is
