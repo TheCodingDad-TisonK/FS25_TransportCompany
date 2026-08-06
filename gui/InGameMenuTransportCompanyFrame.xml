@@ -59,6 +59,8 @@
 		<GuiElement profile="fs25_tcDetailBox" id="detailBox">
 			<Text profile="fs25_tcDetailTitle" id="detailTitle"/>
 			<Text profile="fs25_tcDetailSubtitle" id="detailSubtitle"/>
+			<!-- The wrapper holds the list position/size; the SmoothList
+			     inside fills it at 0,0 so rows are not offset twice. -->
 			<GuiElement profile="fs25_tcDetailListWrap" id="detailListWrap">
 				<SmoothList profile="fs25_tcDetailList" id="detailList">
 					<ListItem profile="fs25_tcDetailItem" name="detailItem">
@@ -67,9 +69,10 @@
 					</ListItem>
 				</SmoothList>
 				<!-- A visible slider so players know the detail rows scroll
-				     instead of reading a clipped list as the end. The same
-				     fs25_listSlider profile the left list uses. -->
-				<ThreePartBitmap profile="fs25_listSliderBox" position="12px 0px">
+				     instead of reading a clipped list as the end. The
+				     slider box profile positions itself at the wrapper's
+				     right edge, the same way the left list does. -->
+				<ThreePartBitmap profile="fs25_subCategoryListSliderBox">
 					<Slider profile="fs25_listSlider" dataElementId="detailList"/>
 				</ThreePartBitmap>
 			</GuiElement>
@@ -148,10 +151,7 @@
 			<absoluteSizeOffset value="40px 0px"/>
 			<position value="0px -148px"/>
 		</Profile>
-		<Profile name="fs25_tcDetailList" extends="emptyPanel" with="anchorTopCenter">
-			<size value="100% 260px"/>
-			<absoluteSizeOffset value="40px 0px"/>
-			<position value="0px -148px"/>
+		<Profile name="fs25_tcDetailList" extends="emptyPanel" with="anchorStretchingYStretchingX">
 			<handleFocus value="false"/>
 		</Profile>
 		<Profile name="fs25_tcScrollHint" extends="fs25_textGrey" with="anchorTopCenter">
