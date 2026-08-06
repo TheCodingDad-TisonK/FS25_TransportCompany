@@ -30,7 +30,7 @@ g_currentMission = {
   end,
   addIngameNotification = function() end,
   getFarmId = function() return 1 end,
-  vehicleSystem = { vehicleByUniqueId = {} },
+  vehicleSystem = { vehicleByUniqueId = {}, vehicles = {} },
 }
 FSBaseMission = { INGAME_NOTIFICATION_OK = {} }
 g_i18n = { getText=function(_,k) return k end,
@@ -201,6 +201,169 @@ local attrib3 = makeContract("att3", 1000, 1, 500, STATION_C)
 mgr:onGoodsDelivered(STATION_C, 1, 1000, FillType.WHEAT)
 ok(attrib3.state == C.STATE_COMPLETED, "delivery completes with no truck matched")
 ok(#booked == 1, "payout independent of attribution", #booked)
+
+print("\n-- return-to-HQ after a hired driver finishes --")
+-- Stub the world + AI surface the dispatch touches.
+MathUtil = { getYRotationFromDirection = function() return 1.5 end }
+function getWorldTranslation(node) return node.hx or 100, 0, node.hz or 200 end
+function localDirectionToWorld(node) return node.dx or 1, 0, node.dz or 0 end
+local startedJobs = {}
+g_currentMission.aiJobTypeManager = {
+    createJob = function(_, jobType)
+        return {
+            jobType = jobType,
+            vehicleParameter = { setVehicle = function(_, v) selfVeh = v end },
+            positionAngleParameter = {
+                posX, posZ, ang,
+                setPosition = function(_, x, z) posX, posZ = x, z end,
+                setAngle = function(_, a) ang = a end,
+            },
+            setValues = function() end,
+            validate = function() return true end,
+        }
+    end,
+}
+AIJobType = { GOTO = 9, LOAD_AND_DELIVER = 5 }
+g_currentMission.aiSystem = {
+    startJob = function(_, job) table.insert(startedJobs, job) end,
+    getJobById = function() return nil end,
+    -- Parking probe: only positions on the +X axis are reachable, so
+    -- the first candidate (12 m ahead, local +Z -> +X world) wins.
+    -- Signature: (self, x, y, z).
+    getIsPositionReachable = function(_, x, y, z)
+        return x > 0 and z == 200
+    end,
+}
+g_currentMission.placeableSystem = {}
+
+-- A truck that completed a hired contract, parked in front of an HQ.
+local retVeh = {
+    getUniqueId = function() return "vehicleRet" end,
+    getFullName = function() return "Returner" end,
+    getOwnerFarmId = function() return 1 end,
+    getIsBeingDeleted = function() return false end,
+    getChildVehicles = function() return {} end,
+    rootNode = { hx = 100, hz = 200, dx = 1, dz = 0 },
+}
+local retTruck = TransportCompanyTruck.new(retVeh)
+retTruck.farmId = 1
+retTruck.isEnrolled = true
+comp.trucks["vehicleRet"] = retTruck
+g_currentMission.vehicleSystem.vehicleByUniqueId["vehicleRet"] = retVeh
+
+-- An HQ owned by farm 1 in the manager's registry.
+local hq = { rootNode = { hx = 100, hz = 200, dx = 1, dz = 0 } }
+hq.getOwnerFarmId = function() return 1 end
+mgr.hqPlaceables["hq1"] = hq
+
+local retContract = makeContract("ret1", 1000, 1, 500, STATION_C)
+retContract.isHiredDriver = true
+retContract.acceptedTruckUniqueId = "vehicleRet"
+retContract.hiredDriverJobId = 77
+
+-- The return trip is QUEUED on success, then fired by update() after
+-- the delay (so the finished AI job's agent release completes first).
+startedJobs = {}
+mgr:_queueReturnToHq(comp, retContract)
+ok(#mgr._pendingReturnTrips == 1, "return trip is queued, not fired inline", #mgr._pendingReturnTrips)
+ok(#startedJobs == 0, "no GOTO job started before the delay")
+mgr:update(TransportCompanyManager.RETURN_DISPATCH_DELAY_MS - 1)
+ok(#startedJobs == 0, "still no GOTO before the delay elapses")
+mgr:update(2)
+ok(#startedJobs == 1, "GOTO job starts after the delay", #startedJobs)
+ok(#mgr._pendingReturnTrips == 0, "queue drained after firing")
+if startedJobs[1] ~= nil then
+    ok(startedJobs[1].jobType == AIJobType.GOTO, "job is a GOTO, not load-and-deliver",
+       startedJobs[1].jobType)
+    ok(posX ~= nil and posZ ~= nil, "job carries a parking position", string.format("%s,%s", tostring(posX), tostring(posZ)))
+    -- HQ at (100,200) facing +Z local -> +X world, parked 12 m ahead.
+    ok(posX and posZ and math.abs(posX - (100 + 12)) < 0.01 and math.abs(posZ - 200) < 0.01,
+       "parking spot is offset in front of the HQ", string.format("x=%s z=%s", tostring(posX), tostring(posZ)))
+    ok(ang ~= nil and ang ~= 0, "job carries a parking facing angle", tostring(ang))
+end
+
+-- The probe skips unreachable candidates: with the 12 m spot blocked,
+-- it must fall through to the next distance the AI confirms.
+g_currentMission.aiSystem.getIsPositionReachable = function(_, x, y, z)
+    -- 12 m out on +X is blocked; the other directions at 12 m are clear.
+    if math.abs(x - 112) < 0.01 then return false end
+    return x > 0 and z == 200
+end
+startedJobs = {}
+local fallContract = makeContract("retF", 1000, 1, 500, STATION_C)
+fallContract.isHiredDriver = true
+fallContract.acceptedTruckUniqueId = "vehicleRet"
+mgr:_queueReturnToHq(comp, fallContract)
+mgr:update(TransportCompanyManager.RETURN_DISPATCH_DELAY_MS + 1)
+ok(#startedJobs == 1, "fallback GOTO starts", #startedJobs)
+-- The probe skips the blocked +X candidate and takes the next reachable
+-- spot (12 m behind the HQ, x=88) rather than giving up or jumping far.
+ok(posX and posZ and math.abs(posX - (100 - 12)) < 0.01,
+   "unreachable first candidate falls to another reachable spot",
+   string.format("x=%s", tostring(posX)))
+-- Restore the stub.
+g_currentMission.aiSystem.getIsPositionReachable = function(_, x, y, z)
+    return x > 0 and z == 200
+end
+
+-- No HQ: the queued trip fires and does nothing, no crash.
+mgr.hqPlaceables["hq1"] = nil
+startedJobs = {}
+local noHqContract = makeContract("ret2", 1000, 1, 500, STATION_C)
+noHqContract.isHiredDriver = true
+noHqContract.acceptedTruckUniqueId = "vehicleRet"
+local okNoHq, errNoHq = pcall(function()
+    mgr:_queueReturnToHq(comp, noHqContract)
+    mgr:update(TransportCompanyManager.RETURN_DISPATCH_DELAY_MS + 1)
+end)
+ok(okNoHq and #startedJobs == 0, "no dispatch without an HQ, no crash", errNoHq)
+
+-- A self-hauled contract never queues a return trip.
+mgr.hqPlaceables["hq1"] = hq
+startedJobs = {}
+local selfContract = makeContract("ret3", 1000, 1, 500, STATION_C)
+selfContract.isHiredDriver = false
+selfContract.acceptedTruckUniqueId = "vehicleRet"
+mgr:_queueReturnToHq(comp, selfContract)
+ok(#mgr._pendingReturnTrips == 0, "self-hauled contract does not queue a return trip")
+
+-- The Return truck to HQ setting off disables the trip entirely.
+startedJobs = {}
+comp.settings:set("returnTruckToHq", false)
+local offContract = makeContract("retOff", 1000, 1, 500, STATION_C)
+offContract.isHiredDriver = true
+offContract.acceptedTruckUniqueId = "vehicleRet"
+mgr:_queueReturnToHq(comp, offContract)
+ok(#mgr._pendingReturnTrips == 0, "return trip disabled by the setting")
+comp.settings:set("returnTruckToHq", true)
+mgr:_queueReturnToHq(comp, offContract)
+ok(#mgr._pendingReturnTrips == 1, "return trip re-enabled when the setting is on")
+mgr._pendingReturnTrips = {}
+
+-- A validate failure retries once after the longer delay, then gives up.
+g_currentMission.aiJobTypeManager.createJob = function(_, jobType)
+    return {
+        jobType = jobType,
+        vehicleParameter = { setVehicle = function() end },
+        positionAngleParameter = {
+            setPosition = function() end,
+            setAngle = function() end,
+        },
+        setValues = function() end,
+        validate = function() return false, "no route" end,
+    }
+end
+startedJobs = {}
+local failContract = makeContract("ret4", 1000, 1, 500, STATION_C)
+failContract.isHiredDriver = true
+failContract.acceptedTruckUniqueId = "vehicleRet"
+failContract.contractId = "ret4-fail"
+mgr:_queueReturnToHq(comp, failContract)
+mgr:update(TransportCompanyManager.RETURN_DISPATCH_DELAY_MS + 1)
+ok(#mgr._pendingReturnTrips == 1, "failed validate re-queues for one retry", #mgr._pendingReturnTrips)
+mgr:update(TransportCompanyManager.RETURN_RETRY_DELAY_MS + 1)
+ok(#mgr._pendingReturnTrips == 0, "no third attempt after the retry", #mgr._pendingReturnTrips)
+ok(#startedJobs == 0, "no GOTO started when validate keeps failing")
 
 print(string.format("\n%d passed, %d failed", pass, fail))
 return fail

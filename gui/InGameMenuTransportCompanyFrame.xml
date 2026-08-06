@@ -114,24 +114,30 @@
 			<position value="170px 0px"/>
 		</Profile>
 		<Profile name="fs25_tcDetailTitle" extends="fs25_textDefault" with="anchorTopStretchingX">
-			<size value="100% 44px"/>
+			<size value="100% 64px"/>
 			<position value="0px -20px"/>
 			<textSize value="32px"/>
 			<textBold value="true"/>
 			<textUpperCase value="true"/>
 			<textAlignment value="center"/>
 			<textColor value="$preset_fs25_colorMainHighlight"/>
+			<textWrapWidth value="840px"/>
+			<textMaxNumLines value="2"/>
 		</Profile>
 		<Profile name="fs25_tcDetailSubtitle" extends="fs25_textGrey" with="anchorTopStretchingX">
-			<size value="100% 32px"/>
-			<position value="0px -66px"/>
+			<size value="100% 56px"/>
+			<position value="0px -84px"/>
 			<textSize value="24px"/>
 			<textAlignment value="center"/>
+			<!-- Setting descriptions are a full sentence and must wrap,
+			     not clip to one line. -->
+			<textWrapWidth value="840px"/>
+			<textMaxNumLines value="2"/>
 		</Profile>
 		<Profile name="fs25_tcDetailList" extends="emptyPanel" with="anchorTopCenter">
-			<size value="100% 300px"/>
+			<size value="100% 260px"/>
 			<absoluteSizeOffset value="40px 0px"/>
-			<position value="0px -116px"/>
+			<position value="0px -148px"/>
 			<handleFocus value="false"/>
 		</Profile>
 		<Profile name="fs25_tcDetailItem" extends="baseReference" with="anchorTopStretchingX alternating">

@@ -212,6 +212,10 @@ function TransportCompanyTruck:beginSampling(vehicle)
         self.sampleFillLevels[index] = vehicle:getFillUnitFillLevel(index)
     end
     self.lastSampledDistance = vehicle.lastMovedDistance or 0
+    -- A truck that already has odometer distance when it first enrolls
+    -- must not be serviced for miles driven before the company tracked
+    -- it. The service clock starts now.
+    self:normalizeService()
 end
 
 --- Does this vehicle qualify as a company truck?
@@ -238,12 +242,37 @@ function TransportCompanyTruck:checkService()
         return 0
     end
 
-    local cost = TransportCompanyTruck.SERVICE_BASE_COST
-        + self.servicesDone * TransportCompanyTruck.SERVICE_COST_PER_KM * TransportCompanyTruck.SERVICE_INTERVAL_KM
-    self.servicesDone = self.servicesDone + 1
-    self.nextServiceKm = self.nextServiceKm + TransportCompanyTruck.SERVICE_INTERVAL_KM
-    self.otherCost = (self.otherCost or 0) + cost
-    return cost
+    -- Charge every overdue service in one bill, then land on the
+    -- milestone past the current odometer. Without the loop a truck
+    -- that comes back from a long drive would be serviced once per
+    -- tick until it caught up (cost=4000 then cost=6000 in the same
+    -- second, straight from the game log).
+    local total = 0
+    while self.distanceM >= self.nextServiceKm do
+        total = total + TransportCompanyTruck.SERVICE_BASE_COST
+            + self.servicesDone * TransportCompanyTruck.SERVICE_COST_PER_KM
+            * TransportCompanyTruck.SERVICE_INTERVAL_KM
+        self.servicesDone = self.servicesDone + 1
+        self.nextServiceKm = self.nextServiceKm + TransportCompanyTruck.SERVICE_INTERVAL_KM
+    end
+
+    self.otherCost = (self.otherCost or 0) + total
+    return total
+end
+
+---Normalise the service milestone against the current odometer so a
+---truck that already carried distance when it started being tracked
+---(or when a save was made without the maintenance feature) is not
+---charged retroactively for miles it drove before. Call on enrollment
+---and after loading a truck from a savegame. The first service then
+---comes SERVICE_INTERVAL_KM after the moment tracking begins.
+function TransportCompanyTruck:normalizeService()
+    if self.nextServiceKm == nil then
+        self.nextServiceKm = TransportCompanyTruck.SERVICE_INTERVAL_KM
+    end
+    while (self.distanceM or 0) >= self.nextServiceKm do
+        self.nextServiceKm = self.nextServiceKm + TransportCompanyTruck.SERVICE_INTERVAL_KM
+    end
 end
 
 --- Try to find the live vehicle; returns (vehicle, shouldUnenroll).

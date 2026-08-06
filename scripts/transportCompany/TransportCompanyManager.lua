@@ -45,6 +45,19 @@ TransportCompanyManager.STUCK_CHECK_INTERVAL_MS = 20000  -- evaluate every 20s
 TransportCompanyManager.STUCK_MIN_DISTANCE_M = 8         -- must cover at least this far
 TransportCompanyManager.STUCK_MAX_REPLAN_ATTEMPTS = 3    -- give up after this many forced replans
 
+-- ── Return-to-HQ trip ──────────────────────────
+-- When a hired driver finishes a contract, the truck is dispatched
+-- back to park near the company HQ instead of being left at the
+-- delivery point. Candidate parking distances probed around the
+-- building (the first reachable one is used), from just past the shed
+-- footprint out to a comfortable drive-off distance.
+TransportCompanyManager.HQ_PARK_DISTANCES = { 12, 20, 30 }
+-- Delay before the return GOTO job starts, so the finished AI job's
+-- agent release (deleteAgent / aiJobFinished) fully completes first.
+TransportCompanyManager.RETURN_DISPATCH_DELAY_MS = 2000
+-- Delay before a retried return trip after the first validate failed.
+TransportCompanyManager.RETURN_RETRY_DELAY_MS = 8000
+
 -- ── Singleton ─────────────────────────────────
 
 ---@return TransportCompanyManager
@@ -126,6 +139,18 @@ function TransportCompanyManager.new(modDirectory, modName)
 
     -- Change-only board diagnostics: farmId → last logged snapshot.
     self._lastBoardSnapshot = {}
+
+    -- Pending return-to-HQ trips: { company, contract, timer }. The
+    -- return GOTO job is started a couple of seconds AFTER the AI job
+    -- it follows reports success, not synchronously inside the
+    -- AI_JOB_STOPPED handler, so the old job's agent teardown
+    -- (deleteAgent / aiJobFinished) has fully completed first. Starting
+    -- a fresh AI job in the same call stack as the stop was racing the
+    -- release and left the truck standing still.
+    self._pendingReturnTrips = {}
+    -- contractId -> true: this contract's return trip already retried
+    -- once; a second validate failure gives up.
+    self._returnRetried = {}
 
     -- One-per-session flags (see _ensureMissionStartup). Reset on
     -- mission teardown so a fresh career re-arms them.
@@ -359,6 +384,8 @@ function TransportCompanyManager:_onDeleteMission()
     self.hqPlaceables = {}
     self.companies = {}
     self._lastBoardSnapshot = {}
+    self._pendingReturnTrips = {}
+    self._returnRetried = {}
     self.isMissionStarted = false
     self.isMissionLoaded = false
     self._startupRan = false
@@ -868,6 +895,10 @@ function TransportCompanyManager:_loadCompanyFromFile(company, filePath)
         if uniqueId == nil or uniqueId == "" then break end
 
         local truck = TransportCompanyTruck.loadFromXMLFile(xmlFile, key)
+        -- A truck saved before the maintenance feature existed (or that
+        -- already had odometer distance) must not be serviced for miles
+        -- it drove before. Normalise the milestone at load.
+        truck:normalizeService()
         company.trucks[truck.uniqueId] = truck
         truckIdx = truckIdx + 1
     end
@@ -1072,6 +1103,19 @@ function TransportCompanyManager:update(dt)
                 company.wageTimer = 0
                 self:_payWeeklyWages(company)
             end
+        end
+    end
+
+    -- Fire deferred return-to-HQ trips once their delay elapses. The
+    -- delay is so the finished AI job's agent release fully completes
+    -- before the GOTO starts (starting it synchronously inside the
+    -- AI_JOB_STOPPED handler left the truck standing still).
+    for i = #self._pendingReturnTrips, 1, -1 do
+        local trip = self._pendingReturnTrips[i]
+        trip.timer = trip.timer - dt
+        if trip.timer <= 0 then
+            table.remove(self._pendingReturnTrips, i)
+            self:_dispatchReturnToHq(trip.company, trip.contract)
         end
     end
 end
@@ -1280,7 +1324,7 @@ function TransportCompanyManager:_hireDriver(company, farmId)
     end
 
     local cost = TransportCompanyDriver.HIRE_COST
-    if g_currentMission ~= nil and g_currentMission:getFarmMoney(farmId) < cost then
+    if self:_getFarmMoney(farmId) < cost then
         self:_notify(g_i18n:getText("transportCompany_noMoney"), farmId)
         return false
     end
@@ -1329,7 +1373,7 @@ function TransportCompanyManager:_upgradeHq(company, farmId)
         self:_notify(g_i18n:getText("transportCompany_hqMaxLevel"), farmId)
         return false
     end
-    if g_currentMission ~= nil and g_currentMission:getFarmMoney(farmId) < cost then
+    if self:_getFarmMoney(farmId) < cost then
         self:_notify(g_i18n:getText("transportCompany_noMoney"), farmId)
         return false
     end
@@ -2094,6 +2138,11 @@ function TransportCompanyManager:_onAIServerJobStopped(job, aiMessage)
             for _, contract in pairs(company.contracts) do
                 if contract.isHiredDriver and contract.hiredDriverJobId == job.jobId then
                     self:_completeHiredDriverContract(company, contract, job)
+                    -- The truck is free now: send it back to park at the
+                    -- HQ instead of leaving it stranded at the delivery.
+                    -- Deferred a couple of seconds so the finished job's
+                    -- agent release is complete before the GOTO starts.
+                    self:_queueReturnToHq(company, contract)
                     break
                 end
             end
@@ -2143,6 +2192,158 @@ function TransportCompanyManager:_completeHiredDriverContract(company, contract,
     self:_completeContract(company, contract)
 end
 
+---Send the truck that just finished a hired-driver contract back to
+---park in front of the company HQ. The GOTO job is started a couple of
+---seconds after the AI job it follows reports success (not synchronously
+---inside the AI_JOB_STOPPED handler), so the old job's agent release
+---fully completes first. A no-op when the HQ is gone, the truck was
+---sold, or the truck is not AI-capable. Never blocks the completion that
+---triggered it.
+---@param company TransportCompanyCompany
+---@param contract TransportCompanyContract
+function TransportCompanyManager:_queueReturnToHq(company, contract)
+    if not self.isServer then return end
+    if company == nil or contract == nil then return end
+    if not contract.isHiredDriver then return end
+    -- The player can turn the return trip off: the truck then stays
+    -- where the job ended instead of burning fuel/time driving home.
+    if company.settings:get("returnTruckToHq") == false then
+        return
+    end
+
+    table.insert(self._pendingReturnTrips, {
+        company = company,
+        contract = contract,
+        timer = TransportCompanyManager.RETURN_DISPATCH_DELAY_MS,
+    })
+end
+
+---Start the deferred return trip for a contract. Called from update()
+---once the queue timer elapses.
+---@param company TransportCompanyCompany
+---@param contract TransportCompanyContract
+function TransportCompanyManager:_dispatchReturnToHq(company, contract)
+    if not self.isServer then return end
+    if company == nil or contract == nil then return end
+
+    local truck = company.trucks[contract.acceptedTruckUniqueId]
+    if truck == nil then return end
+    local vehicle = truck:getVehicle()
+    if vehicle == nil or vehicle:getIsBeingDeleted() or vehicle.rootNode == nil then
+        return
+    end
+
+    local x, z = self:_getHqParkingTarget(company.farmId)
+    if x == nil then
+        TransportCompanyLog.debug(
+            "return-to-HQ: no HQ for farm %s, truck stays put", tostring(company.farmId)
+        )
+        return
+    end
+
+    local ok, result = pcall(function()
+        local job = g_currentMission.aiJobTypeManager:createJob(AIJobType.GOTO)
+        if job == nil then return false end
+
+        -- The truck drives to the parking point and stops on its OWN
+        -- heading. A forced facing toward the building made the AI try
+        -- to achieve a final orientation it could not reach beside the
+        -- shed, which is exactly the "target unreachable" error seen in
+        -- game. This mirrors AIJobGoTo:applyCurrentState, which keeps
+        -- the vehicle's current direction when there is no prior target.
+        local dirX, _, dirZ = localDirectionToWorld(vehicle.rootNode, 0, 0, 1)
+        local heading = MathUtil.getYRotationFromDirection(dirX, dirZ)
+
+        job.vehicleParameter:setVehicle(vehicle)
+        job.positionAngleParameter:setPosition(x, z)
+        job.positionAngleParameter:setAngle(heading)
+        job:setValues()
+
+        local isValid, errorMessage = job:validate(company.farmId)
+        if not isValid then
+            -- A parking spot the AI cannot reach (against a wall, a
+            -- fence, another building) would leave the truck standing
+            -- still forever. Retry once after a longer delay so the
+            -- map's AI has a moment to settle, then give up.
+            if not self._returnRetried[contract.contractId] then
+                self._returnRetried[contract.contractId] = true
+                table.insert(self._pendingReturnTrips, {
+                    company = company,
+                    contract = contract,
+                    timer = TransportCompanyManager.RETURN_RETRY_DELAY_MS,
+                })
+            end
+            TransportCompanyLog.debug(
+                "return-to-HQ validate failed for %s: %s",
+                tostring(truck.vehicleName or truck.uniqueId), tostring(errorMessage)
+            )
+            return false
+        end
+
+        g_currentMission.aiSystem:startJob(job, company.farmId)
+        TransportCompanyLog.info(
+            "Truck %s returning to HQ (farm %s)",
+            truck.vehicleName or truck.uniqueId, tostring(company.farmId)
+        )
+        return true
+    end)
+
+    if not ok then
+        TransportCompanyLog.error("Return-to-HQ dispatch failed: %s", tostring(result))
+    end
+end
+
+---Compute a parking spot near an HQ owned by the given farm. Probes a
+---small grid of offsets around the building (ahead, behind, each side,
+---at a few distances) and returns the first one the AI confirms is
+---reachable, so the GOTO job never reports "target unreachable" the way
+---a single blind offset did. The truck keeps its own heading on arrival.
+---@param farmId number
+---@return number|nil x, number|nil z
+function TransportCompanyManager:_getHqParkingTarget(farmId)
+    if g_currentMission == nil or g_currentMission.placeableSystem == nil then
+        return nil
+    end
+    if g_currentMission.aiSystem == nil
+       or g_currentMission.aiSystem.getIsPositionReachable == nil then
+        return nil
+    end
+
+    for _, placeable in pairs(self.hqPlaceables) do
+        if placeable ~= nil and placeable.rootNode ~= nil
+           and self:_getHqFarmId(placeable) == farmId then
+            local hx, _, hz = getWorldTranslation(placeable.rootNode)
+
+            -- Candidate offsets around the building. Local axes first
+            -- (front/back/sides, the natural door directions), then the
+            -- world axes as a fallback for odd rotations. Distances go
+            -- out far enough to clear the shed footprint.
+            local fdx, _, fdz = localDirectionToWorld(placeable.rootNode, 0, 0, 1)
+            local rdx, _, rdz = localDirectionToWorld(placeable.rootNode, 1, 0, 0)
+            local worldAxes = {
+                { fdx, fdz }, { -fdx, -fdz }, { rdx, rdz }, { -rdx, -rdz },
+                { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 },
+            }
+
+            for _, distance in ipairs(TransportCompanyManager.HQ_PARK_DISTANCES) do
+                for _, axis in ipairs(worldAxes) do
+                    local px = hx + axis[1] * distance
+                    local pz = hz + axis[2] * distance
+                    if g_currentMission.aiSystem:getIsPositionReachable(px, 0, pz) then
+                        return px, pz
+                    end
+                end
+            end
+
+            TransportCompanyLog.debug(
+                "return-to-HQ: no reachable parking spot near the HQ"
+            )
+            return nil
+        end
+    end
+    return nil
+end
+
 ---Book money against a farm. Server-only (addMoney refuses to run on
 ---a client, FSBaseMission.lua:2021) and never with farmId 0, which the
 ---engine rejects as the spectator farm (FSBaseMission.lua:2006).
@@ -2154,6 +2355,22 @@ function TransportCompanyManager:_addMoney(amount, farmId, moneyType)
         return
     end
     g_currentMission:addMoney(amount, farmId, moneyType, true, true)
+end
+
+---Read a farm's current account balance. The base game exposes the
+---balance on the Farm object, not the mission (Farm:getBalance,
+---Farm.md:148-161); g_farmManager:getFarmById resolves the farm.
+---@param farmId number
+---@return number balance, 0 when the farm cannot be resolved
+function TransportCompanyManager:_getFarmMoney(farmId)
+    if farmId == nil or farmId <= 0 or g_farmManager == nil then
+        return 0
+    end
+    local farm = g_farmManager:getFarmById(farmId)
+    if farm == nil or farm.getBalance == nil then
+        return 0
+    end
+    return farm:getBalance() or 0
 end
 
 -- ── Money Event Handling ──────────────────────

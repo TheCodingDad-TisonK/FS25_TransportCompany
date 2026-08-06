@@ -6,7 +6,7 @@
 -- the PDA page, intro hints, and console commands.
 -- =========================================================
 
-TransportCompanyLog.info("Transport Company v1.2.0.0 loading")
+TransportCompanyLog.info("Transport Company v1.2.2.0 loading")
 
 -- Create the manager singleton (g_currentModDirectory is available at load time)
 g_transportCompanyManager = TransportCompanyManager.new(
@@ -17,4 +17,4 @@ g_transportCompanyManager = TransportCompanyManager.new(
 -- Register mission lifecycle hooks and console commands
 g_transportCompanyManager:load()
 
-TransportCompanyLog.info("Transport Company v1.2.0.0 loaded")
+TransportCompanyLog.info("Transport Company v1.2.2.0 loaded")

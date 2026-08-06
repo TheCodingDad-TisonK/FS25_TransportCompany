@@ -120,6 +120,13 @@ function InGameMenuTransportCompanyFrame:initialize()
             self:onButtonUpgradeHq()
         end
     }
+    self.helpButtonInfo = {
+        inputAction = InputAction.MENU_EXTRA_2,
+        text = g_i18n:getText("transportCompany_help"),
+        callback = function()
+            self:onButtonHelp()
+        end
+    }
 
     -- Sub-category selector (Dispatch / Fleet / Ledger tabs)
     self.subCategorySelector = self:getDescendantById("subCategorySelector")
@@ -324,6 +331,10 @@ function InGameMenuTransportCompanyFrame:_updateMenuButtons()
             end
         end
     end
+
+    -- Help is available on every tab: a guide to how the company works,
+    -- including what to do when a hired driver gets stuck.
+    table.insert(buttons, self.helpButtonInfo)
 
     self:setMenuButtonInfo(buttons)
     self:setMenuButtonInfoDirty()
@@ -580,6 +591,12 @@ function InGameMenuTransportCompanyFrame:onButtonUpgradeHq()
         g_currentMission:getFarmId(), nil, nil
     )
     self:updateTabContent()
+end
+
+function InGameMenuTransportCompanyFrame:onButtonHelp()
+    if TransportCompanyHelpDialog ~= nil and TransportCompanyHelpDialog.show ~= nil then
+        TransportCompanyHelpDialog.show()
+    end
 end
 
 -- ── Detail panel ───────────────────────────────

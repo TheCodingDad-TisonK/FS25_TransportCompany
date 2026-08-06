@@ -29,6 +29,14 @@ TransportCompanyLog = { info = function() end, debug = function() end,
 
 local booked = {}
 local farmMoney = 1000000
+local farmObj = {
+    getBalance = function() return farmMoney end,
+}
+g_farmManager = {
+    getFarmById = function(_, farmId)
+        return farmId == 1 and farmObj or nil
+    end,
+}
 g_currentMission = {
     time = 5000,
     hud = {},
@@ -36,7 +44,6 @@ g_currentMission = {
         farmMoney = farmMoney + amount
         table.insert(booked, { amount = amount, farmId = farmId, moneyType = moneyType })
     end,
-    getFarmMoney = function() return farmMoney end,
     addIngameNotification = function() end,
     getFarmId = function() return 1 end,
     vehicleSystem = { vehicleByUniqueId = {} },
@@ -93,6 +100,9 @@ ok(drv ~= nil and drv.name ~= "" and drv.weeklyWage > 0, "driver has name and wa
 ok(drv:getCurrentWage() == drv.weeklyWage, "new driver at base wage")
 ok(approx(farmMoney, 1000000 - D.HIRE_COST), "hire cost deducted",
    string.format("money=%d", farmMoney))
+ok(mgr:_getFarmMoney(1) == farmMoney, "farm balance read via g_farmManager", mgr:_getFarmMoney(1))
+ok(mgr:_getFarmMoney(0) == 0, "balance read refuses farmId 0")
+ok(mgr:_getFarmMoney(99) == 0, "balance read refuses unknown farm")
 
 print("\n-- driver experience raises the wage --")
 drv:addJob(20)
@@ -111,6 +121,14 @@ comp:addReputation(CC.REPUTATION_PER_LEVEL * 2)  -- level 3
 ok(comp:getDriverCap() == CC.BASE_DRIVER_CAP + 2, "cap grew with level", comp:getDriverCap())
 ok(mgr:onDriverRequest(TransportCompanyDriverEvent.ACTION_HIRE, 1, nil, nil),
    "hire again after level-up")
+
+print("\n-- hire refused when the farm cannot pay --")
+farmMoney = 100
+local countBefore = comp:getDriverCount()
+ok(mgr:onDriverRequest(TransportCompanyDriverEvent.ACTION_HIRE, 1, nil, nil) == false,
+   "hire refused with insufficient funds")
+ok(comp:getDriverCount() == countBefore, "no driver added on refused hire")
+farmMoney = 1000000
 
 print("\n-- assign driver to a truck --")
 local truckVeh = {
@@ -172,6 +190,27 @@ ok(mTruck:checkService() == 0, "no double service immediately after")
 mTruck.distanceM = TransportCompanyTruck.SERVICE_INTERVAL_KM * 2
 local cost2 = mTruck:checkService()
 ok(cost2 > TransportCompanyTruck.SERVICE_BASE_COST, "later services cost more", cost2)
+
+print("\n-- maintenance catch-up charges all due in one bill --")
+-- A truck that comes back from a long drive past several milestones
+-- must pay for them all in ONE check, not one service per tick.
+local catchTruck = TransportCompanyTruck.new(truckVeh)
+catchTruck.distanceM = TransportCompanyTruck.SERVICE_INTERVAL_KM * 5
+local catchCost = catchTruck:checkService()
+ok(catchCost > TransportCompanyTruck.SERVICE_BASE_COST * 4, "catch-up bills all overdue", catchCost)
+ok(catchTruck.servicesDone == 5, "catch-up counted all five", catchTruck.servicesDone)
+ok(catchTruck:checkService() == 0, "no drip after catch-up")
+
+print("\n-- legacy truck not serviced retroactively --")
+-- A truck saved before maintenance existed loads with real distance
+-- but a default milestone; normalizeService must push the milestone
+-- past that distance so no retroactive bill lands on load.
+local legacyTruck = TransportCompanyTruck.new(truckVeh)
+legacyTruck.distanceM = 12500
+legacyTruck.nextServiceKm = TransportCompanyTruck.SERVICE_INTERVAL_KM  -- default from old save
+legacyTruck:normalizeService()
+ok(legacyTruck.nextServiceKm > 12500, "milestone rolled past the odometer", legacyTruck.nextServiceKm)
+ok(legacyTruck:checkService() == 0, "no service for pre-tracking miles")
 
 print("\n-- weekly wages --")
 booked = {}

@@ -93,6 +93,15 @@ TransportCompanySettings.definitions = {
         -- still runs - it just keeps quiet.
     },
     {
+        id = "returnTruckToHq",
+        type = "boolean",
+        default = true,
+        -- When a hired driver finishes a contract, drive the truck back
+        -- to park at the HQ instead of leaving it at the delivery point.
+        -- Off leaves the truck where the job ended (saves the return
+        -- trip's fuel and time, but you collect it from the drop-off).
+    },
+    {
         id = "debugMode",
         type = "boolean",
         default = false,

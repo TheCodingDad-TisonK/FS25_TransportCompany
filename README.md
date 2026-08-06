@@ -123,6 +123,7 @@ All settings live in the **Settings** tab of the dispatch office. Highlight one 
 | **Contracts on the board** | 1 – 12 | 5 | How many open jobs the board holds |
 | **Deadline (days)** | 1 – 30 | 7 | Time allowed once a contract is accepted |
 | **Driver wage share** | 0 – 100% | 20% | Cut a hired driver keeps from the reward |
+| **Return truck to HQ** | On / Off | On | Drive a finished truck back to park at the HQ, or leave it at the delivery point |
 | **Notifications** | On / Off | On | Messages on accept, delivery and expiry |
 | **Debug logging** | On / Off | Off | Verbose output to the game log |
 
@@ -223,7 +224,7 @@ This mod is licensed under **[CC BY-NC-ND 4.0](https://creativecommons.org/licen
 
 You may share it in its original form with attribution. You may not sell it, modify and redistribute it, or reupload it under a different name or authorship. Contributions via pull request are explicitly permitted and encouraged.
 
-**Author:** TisonK &nbsp;·&nbsp; **Version:** 1.2.0.0
+**Author:** TisonK &nbsp;·&nbsp; **Version:** 1.2.2.0
 
 © 2026 TisonK - See [LICENSE](LICENSE) for full terms.
 
