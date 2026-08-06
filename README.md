@@ -202,6 +202,19 @@ Available with the developer console enabled.
 
 ---
 
+## 🗺️ Roadmap
+
+What is planned or under consideration:
+
+- **Truck-brand contracts** — contracts that reflect the capabilities of the trucks you actually own, not just a generic board.
+- **More driver autonomy** — better route choices, refuelling and staging decisions for hired drivers.
+- **Regional pricing** — supply and demand shifts that follow what the farms around you actually grow and use.
+- **Company prestige** — reputation that unlocks higher-value contracts as your books stay clean.
+
+This list is not a promise. Issues and discussion decide what actually ships.
+
+---
+
 ## 🤝 Contributing
 
 Found a bug? [Open an issue](https://github.com/TheCodingDad-TisonK/FS25_TransportCompany/issues/new) — the game log (`log.txt`) is worth more than a description.

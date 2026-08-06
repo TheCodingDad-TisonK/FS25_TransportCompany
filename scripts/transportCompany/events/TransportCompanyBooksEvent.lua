@@ -48,8 +48,8 @@ end
 
 function TransportCompanyBooksEvent:writeStream(streamId, connection)
     streamWriteInt32(streamId, self.farmId or 0)
-    streamWriteFloat64(streamId, self.ledgerRevenue or 0)
-    streamWriteFloat64(streamId, self.ledgerDriverWages or 0)
+    streamWriteFloat32(streamId, self.ledgerRevenue or 0)
+    streamWriteFloat32(streamId, self.ledgerDriverWages or 0)
     streamWriteInt32(streamId, self.ledgerJobs or 0)
     streamWriteFloat32(streamId, self.reputation or 0)
     streamWriteInt8(streamId, self.hqLevel or 1)
@@ -60,10 +60,10 @@ function TransportCompanyBooksEvent:writeStream(streamId, connection)
         streamWriteString(streamId, t.uniqueId or "")
         streamWriteString(streamId, t.vehicleName or "")
         streamWriteInt32(streamId, t.farmId or 0)
-        streamWriteFloat64(streamId, t.revenue or 0)
-        streamWriteFloat64(streamId, t.fuelCost or 0)
-        streamWriteFloat64(streamId, t.otherCost or 0)
-        streamWriteFloat64(streamId, t.distanceM or 0)
+        streamWriteFloat32(streamId, t.revenue or 0)
+        streamWriteFloat32(streamId, t.fuelCost or 0)
+        streamWriteFloat32(streamId, t.otherCost or 0)
+        streamWriteFloat32(streamId, t.distanceM or 0)
         streamWriteInt32(streamId, t.jobsDelivered or 0)
     end
 
@@ -79,17 +79,17 @@ function TransportCompanyBooksEvent:writeStream(streamId, connection)
     streamWriteInt16(streamId, #history)
     for _, p in ipairs(history) do
         streamWriteInt32(streamId, p.index or 0)
-        streamWriteFloat64(streamId, p.revenue or 0)
-        streamWriteFloat64(streamId, p.wages or 0)
+        streamWriteFloat32(streamId, p.revenue or 0)
+        streamWriteFloat32(streamId, p.wages or 0)
         streamWriteInt32(streamId, p.jobs or 0)
-        streamWriteFloat64(streamId, p.km or 0)
+        streamWriteFloat32(streamId, p.km or 0)
     end
 end
 
 function TransportCompanyBooksEvent:readStream(streamId, connection)
     self.farmId = streamReadInt32(streamId)
-    self.ledgerRevenue = streamReadFloat64(streamId)
-    self.ledgerDriverWages = streamReadFloat64(streamId)
+    self.ledgerRevenue = streamReadFloat32(streamId)
+    self.ledgerDriverWages = streamReadFloat32(streamId)
     self.ledgerJobs = streamReadInt32(streamId)
     self.reputation = streamReadFloat32(streamId)
     self.hqLevel = streamReadInt8(streamId)
@@ -101,10 +101,10 @@ function TransportCompanyBooksEvent:readStream(streamId, connection)
             uniqueId = streamReadString(streamId),
             vehicleName = streamReadString(streamId),
             farmId = streamReadInt32(streamId),
-            revenue = streamReadFloat64(streamId),
-            fuelCost = streamReadFloat64(streamId),
-            otherCost = streamReadFloat64(streamId),
-            distanceM = streamReadFloat64(streamId),
+            revenue = streamReadFloat32(streamId),
+            fuelCost = streamReadFloat32(streamId),
+            otherCost = streamReadFloat32(streamId),
+            distanceM = streamReadFloat32(streamId),
             jobsDelivered = streamReadInt32(streamId),
         })
     end
@@ -121,10 +121,10 @@ function TransportCompanyBooksEvent:readStream(streamId, connection)
     for i = 1, nh do
         table.insert(self.ledgerHistory, {
             index = streamReadInt32(streamId),
-            revenue = streamReadFloat64(streamId),
-            wages = streamReadFloat64(streamId),
+            revenue = streamReadFloat32(streamId),
+            wages = streamReadFloat32(streamId),
             jobs = streamReadInt32(streamId),
-            km = streamReadFloat64(streamId),
+            km = streamReadFloat32(streamId),
         })
     end
 
