@@ -1,7 +1,7 @@
 -- =========================================================
 -- FS25 Transport Company - Books Sync Event
 -- =========================================================
--- Server -> Clients full snapshot of the company ledger and every
+-- Server -> Clients full snapshot of one company's ledger and every
 -- truck's books.
 --
 -- The server samples fuel and distance every tick and applies all
@@ -9,7 +9,9 @@
 -- client in multiplayer would show zero fuel, zero distance and a zero
 -- company ledger in the Fleet and Ledger tabs. The manager broadcasts
 -- it on every contract completion and periodically (every 30s), and
--- the client replaces its ledger and truck figures with the snapshot.
+-- the client replaces its company ledger and truck figures with the
+-- snapshot. The event carries the farmId of the company it belongs to,
+-- so in multiplayer each client only applies its own books.
 --
 -- Mirrors the other Transport Company events (InitEventClass +
 -- emptyNew/new + writeStream/readStream/run).
@@ -25,8 +27,10 @@ end
 
 --- New event; the caller (manager) fills the ledger and truck fields
 --- before sending.
-function TransportCompanyBooksEvent.new()
+---@param farmId number Company these books belong to
+function TransportCompanyBooksEvent.new(farmId)
     local self = TransportCompanyBooksEvent.emptyNew()
+    self.farmId = farmId or 0
     self.ledgerRevenue = 0
     self.ledgerDriverWages = 0
     self.ledgerJobs = 0
@@ -43,6 +47,7 @@ function TransportCompanyBooksEvent.sendEvent(event)
 end
 
 function TransportCompanyBooksEvent:writeStream(streamId, connection)
+    streamWriteInt32(streamId, self.farmId or 0)
     streamWriteFloat64(streamId, self.ledgerRevenue or 0)
     streamWriteFloat64(streamId, self.ledgerDriverWages or 0)
     streamWriteInt32(streamId, self.ledgerJobs or 0)
@@ -62,6 +67,7 @@ function TransportCompanyBooksEvent:writeStream(streamId, connection)
 end
 
 function TransportCompanyBooksEvent:readStream(streamId, connection)
+    self.farmId = streamReadInt32(streamId)
     self.ledgerRevenue = streamReadFloat64(streamId)
     self.ledgerDriverWages = streamReadFloat64(streamId)
     self.ledgerJobs = streamReadInt32(streamId)
@@ -87,5 +93,5 @@ function TransportCompanyBooksEvent:run(connection)
     if g_transportCompanyManager == nil then
         return
     end
-    g_transportCompanyManager:onBooksEvent(self)
+    g_transportCompanyManager:onBooksEvent(self, self.farmId)
 end

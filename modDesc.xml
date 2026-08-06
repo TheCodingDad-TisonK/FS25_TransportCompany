@@ -48,7 +48,7 @@ Es ist keinerlei Vorbereitung der Karte noetig.
   ]]></de>
     </description>
 
-    <version>1.0.1.0</version>
+    <version>2.0.0.0</version>
     <author>TisonK</author>
     <iconFilename>textures/icon_FS25_TransportCompany.dds</iconFilename>
     <multiplayer supported="true"/>
@@ -73,6 +73,7 @@ Es ist keinerlei Vorbereitung der Karte noetig.
         <sourceFile filename="scripts/transportCompany/TransportCompanySettings.lua"/>
         <sourceFile filename="scripts/transportCompany/TransportCompanyContract.lua"/>
         <sourceFile filename="scripts/transportCompany/TransportCompanyTruck.lua"/>
+        <sourceFile filename="scripts/transportCompany/TransportCompanyCompany.lua"/>
         <sourceFile filename="scripts/transportCompany/events/TransportCompanyContractEvent.lua"/>
         <sourceFile filename="scripts/transportCompany/events/TransportCompanyMoneyEvent.lua"/>
         <sourceFile filename="scripts/transportCompany/events/TransportCompanyBooksEvent.lua"/>

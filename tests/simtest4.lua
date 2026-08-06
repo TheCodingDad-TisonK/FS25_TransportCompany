@@ -56,6 +56,7 @@ function TabbedMenuFrameElement:setMenuButtonInfoDirty() self.dirty = true end
 dofile(ROOT .. "/scripts/transportCompany/TransportCompanyContract.lua")
 dofile(ROOT .. "/scripts/transportCompany/TransportCompanyTruck.lua")
 dofile(ROOT .. "/scripts/transportCompany/TransportCompanySettings.lua")
+dofile(ROOT .. "/scripts/transportCompany/TransportCompanyCompany.lua")
 dofile(ROOT .. "/scripts/transportCompany/TransportCompanyManager.lua")
 dofile(ROOT .. "/scripts/gui/InGameMenuTransportCompanyFrame.lua")
 
@@ -66,13 +67,15 @@ TransportCompanyAcceptEvent = { MODE_SELF = 1, MODE_HIRE = 2 }
 
 local mgr = TransportCompanyManager.new("/mods/tc/", "FS25_TransportCompany")
 mgr.isServer, mgr.isMissionLoaded = true, true
-mgr._hasHq = function() return true end
 g_transportCompanyManager = mgr
+-- The PDA binds to the local player's own company (farm 1 here).
+local comp = mgr:getOrCreateCompany(1)
+mgr._hasHq = function() return true end
 
 local c = TransportCompanyContract.new()
 c.contractId, c.amount, c.litersPerUnit, c.reward = "c1", 1000, 1, 500
 c.fillTypeIndex, c.sourceName, c.destName = FillType.WHEAT, "Silo", "Dairy"
-mgr.contracts["c1"] = c
+comp.contracts["c1"] = c
 
 local frame = InGameMenuTransportCompanyFrame.new()
 
@@ -179,7 +182,7 @@ ok(TransportCompanySettings.getIsEditable(shared) == true,
 
 print("")
 print("-- setting values cycle sanely --")
-local st = mgr.settings
+local st = comp.settings
 st:set("showNotifications", true)
 st:cycle("showNotifications", 1)
 ok(st:get("showNotifications") == false, "boolean toggles")
@@ -200,7 +203,7 @@ local done = TransportCompanyContract.new()
 done.contractId, done.amount, done.reward = "old1", 500, 900
 done.fillTypeIndex = FillType.WHEAT
 done:complete()
-mgr.contracts["old1"] = done
+comp.contracts["old1"] = done
 frame:setTab(3)
 ok(frame.rows[1].summary == true, "first row is the company summary")
 local hist = 0

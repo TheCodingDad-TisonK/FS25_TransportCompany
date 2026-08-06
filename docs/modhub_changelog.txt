@@ -1,3 +1,13 @@
+v2.0.0.0
+
+- Per-farm companies: in multiplayer, every farm that owns an HQ now runs its
+  own dispatch board, its own fleet and its own ledger
+- Each company keeps its own board size, deadline, wage share and notification
+  settings; debug logging stays a per-player setting
+- Saved games are now stored per farm and upgrade in place from 1.x saves
+- Board diagnostics no longer spam the log on the 30-second top-up cycle
+- The contract generator is now exercised by the test suite
+
 v1.0.1.0
 
 - Hired drivers can now be stopped and reassigned from the dispatch office

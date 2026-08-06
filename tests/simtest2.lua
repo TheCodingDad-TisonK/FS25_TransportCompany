@@ -46,6 +46,7 @@ g_fillTypeManager = {
 dofile(ROOT .. "/scripts/transportCompany/TransportCompanyContract.lua")
 dofile(ROOT .. "/scripts/transportCompany/TransportCompanyTruck.lua")
 dofile(ROOT .. "/scripts/transportCompany/TransportCompanySettings.lua")
+dofile(ROOT .. "/scripts/transportCompany/TransportCompanyCompany.lua")
 dofile(ROOT .. "/scripts/transportCompany/TransportCompanyManager.lua")
 
 -- event stubs: record broadcasts instead of sending them
@@ -61,6 +62,8 @@ local mgr = TransportCompanyManager.new("/mods/tc/", "FS25_TransportCompany")
 mgr.isServer, mgr.isMissionLoaded = true, true
 mgr._regenerateContractBoard = function() end   -- no world to generate from
 g_transportCompanyManager = mgr
+-- Farm 1's company holds the board, trucks and ledger.
+local comp = mgr:getOrCreateCompany(1)
 
 local STATION_A, STATION_B = {name="A"}, {name="B"}
 local function makeContract(id, amount, litersPerUnit, reward, dest, hired)
@@ -70,7 +73,7 @@ local function makeContract(id, amount, litersPerUnit, reward, dest, hired)
   c.getDestStation = function() return dest end
   c:accept(1, "", hired == true)
   c.isHiredDriver = hired == true
-  mgr.contracts[id] = c
+  comp.contracts[id] = c
   return c
 end
 
@@ -93,24 +96,24 @@ mgr:onGoodsDelivered(STATION_A, 1, 7000, FillType.WHEAT)
 ok(c1.state == C.STATE_COMPLETED, "contract completed")
 ok(#booked == 1 and approx(booked[1].amount, 5000), "paid full reward once", #booked)
 ok(booked[1].farmId == 1, "paid the accepting farm")
-ok(approx(mgr.ledger.revenue, 5000) and mgr.ledger.jobs == 1, "ledger updated")
+ok(approx(comp.ledger.revenue, 5000) and comp.ledger.jobs == 1, "ledger updated")
 booked = {}
 mgr:onGoodsDelivered(STATION_A, 1, 5000, FillType.WHEAT)
 ok(#booked == 0, "already-complete contract does not pay again", #booked)
 
 print("\n-- hired driver: wage split --")
 booked = {}
-mgr.settings:set("hiredDriverRewardShare", 20)
+comp.settings:set("hiredDriverRewardShare", 20)
 local c3 = makeContract("c3", 1000, 1, 1000, STATION_A, true)
 mgr:onGoodsDelivered(STATION_A, 1, 1000, FillType.WHEAT)
 ok(#booked == 2, "two money entries (revenue + wage)", #booked)
 ok(approx(booked[1].amount, 800) and booked[1].moneyType == MoneyType.MISSIONS, "company gets 80%", booked[1].amount)
 ok(approx(booked[2].amount, -200) and booked[2].moneyType == MoneyType.AI, "driver wage debited", booked[2].amount)
-ok(approx(mgr.ledger.driverWages, 200), "wages tracked in ledger", mgr.ledger.driverWages)
+ok(approx(comp.ledger.driverWages, 200), "wages tracked in ledger", comp.ledger.driverWages)
 
 print("\n-- AI job stop is a backstop, never a second payout --")
 booked = {}
-mgr:_completeHiredDriverContract(c3, {jobId=1})
+mgr:_completeHiredDriverContract(comp, c3, {jobId=1})
 ok(#booked == 0, "no double payout from AI stop handler", #booked)
 
 print("\n-- surplus rolls over to a second open contract --")
@@ -131,10 +134,10 @@ ok(okcall and #booked == 0, "spectator farm delivery refused, no crash")
 
 print("\n-- disabled company ignores deliveries --")
 local e1 = makeContract("e1", 100, 1, 50, STATION_A)
-mgr.settings:set("enabled", false)
+comp.settings:set("enabled", false)
 mgr:onGoodsDelivered(STATION_A, 1, 100, FillType.WHEAT)
 ok(approx(e1.delivered, 0), "no credit while disabled", e1.delivered)
-mgr.settings:set("enabled", true)
+comp.settings:set("enabled", true)
 
 print(string.format("\n%d passed, %d failed", pass, fail))
 return fail

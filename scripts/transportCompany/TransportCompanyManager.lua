@@ -1,14 +1,21 @@
 -- =========================================================
 -- FS25 Transport Company - Manager
 -- =========================================================
--- Singleton that orchestrates the entire mod:
---   * Settings load/save
---   * Contract board generation & lifecycle
---   * Truck enrollment & per-truck bookkeeping
+-- Registrar + controller that orchestrates the entire mod:
+--   * Mission lifecycle hooks (load, start, delete)
+--   * HQ scan and per-farm company creation/archival
+--   * Contract board generation & lifecycle (per company)
+--   * Truck enrollment & per-truck bookkeeping (per company)
 --   * Hired-driver AI job dispatch & completion
 --   * PDA page registration (on Mission00.loadMission00Finished)
---   * MP event routing (ContractEvent, MoneyEvent)
+--   * MP event routing (ContractEvent, MoneyEvent, BooksEvent)
 --   * Intro hints registration (base Settings → Gameplay → Hints)
+--
+-- Business state no longer lives here. Each farm that owns an HQ
+-- has a TransportCompanyCompany (its board, ledger, truck books,
+-- shared settings and stuck-watch); the manager is the single
+-- place that owns the company map, the world scan and the MP
+-- routing so that per-farm companies stay in sync in multiplayer.
 --
 -- Pattern mirrors the user's proven mods (SoilFertilizer,
 -- MarketDynamics, NPCFavor): instance created at load time,
@@ -45,6 +52,52 @@ function TransportCompanyManager.getInstance()
     return TransportCompanyManager.INSTANCE
 end
 
+-- ── Company registry ───────────────────────────
+
+---Get or create the company for a farm. Companies are created on
+---HQ placement / scan and archived when the last HQ is sold, but a
+---caller that holds a valid farmId can safely ask for the company
+---object even mid-teardown.
+---@param farmId number
+---@return TransportCompanyCompany|nil
+function TransportCompanyManager:getOrCreateCompany(farmId)
+    if farmId == nil or farmId <= 0 then
+        return nil
+    end
+    local company = self.companies[farmId]
+    if company == nil then
+        company = TransportCompanyCompany.new(farmId)
+        -- Load this farm's server-shared settings (board size, deadline,
+        -- wage share, ...) from its per-company config file.
+        company.settings:loadSettings()
+        self.companies[farmId] = company
+    end
+    return company
+end
+
+---Get an existing company without creating one.
+---@param farmId number
+---@return TransportCompanyCompany|nil
+function TransportCompanyManager:getCompany(farmId)
+    if farmId == nil then return nil end
+    return self.companies[farmId]
+end
+
+---The local player's own company (what the PDA shows).
+---@return TransportCompanyCompany|nil
+function TransportCompanyManager:getLocalCompany()
+    if g_currentMission == nil then return nil end
+    return self:getCompany(g_currentMission:getFarmId())
+end
+
+---Resolve the truck books that belong to a company.
+---@param company TransportCompanyCompany
+---@return table uniqueId → TransportCompanyTruck
+function TransportCompanyManager:_companyTrucks(company)
+    if company == nil then return {} end
+    return company.trucks
+end
+
 ---@param modDirectory string Path to mod directory
 ---@param modName string Name of the mod
 ---@return TransportCompanyManager
@@ -59,30 +112,20 @@ function TransportCompanyManager.new(modDirectory, modName)
     self.modName = TransportCompanyManager.MOD_NAME
 
     -- Sub-systems
-    self.settings = TransportCompanySettings.new()
-    self.trucks = {}          -- uniqueId → TransportCompanyTruck
-    self.contracts = {}       -- contractId → TransportCompanyContract
-    self.hqPlaceables = {}    -- placeableUniqueId → placeable ref
-
-    -- Company-level books. Kept separately from the per-truck books
-    -- because a self-hauled delivery cannot be attributed to a truck:
-    -- the station hook reports liters and fill position, never the
-    -- vehicle that tipped them. Without this the Ledger would show no
-    -- revenue for any contract the player hauled personally.
-    self.ledger = { revenue = 0, driverWages = 0, jobs = 0 }
-
-    -- Per-contract watchdog state for hired drivers: contractId →
-    -- { windowTimer, windowDistance, attempts }. Server-only, never
-    -- persisted — a fresh save simply resumes watching from zero.
-    self.stuckWatch = {}
+    self.settings = TransportCompanySettings.new()      -- global/local-only (debugMode)
+    self.companies = {}          -- farmId → TransportCompanyCompany
+    self.hqPlaceables = {}       -- placeableUniqueId → placeable ref
 
     -- Runtime state
     self.isMissionLoaded = false
     self.isMissionStarted = false
     self.isServer = false
+    self.enrollTimer = 0
     self.tickTimer = 0
     self.deadlineCheckTimer = 0
-    self.booksSyncTimer = 0
+
+    -- Change-only board diagnostics: farmId → last logged snapshot.
+    self._lastBoardSnapshot = {}
 
     -- One-per-session flags (see _ensureMissionStartup). Reset on
     -- mission teardown so a fresh career re-arms them.
@@ -174,7 +217,9 @@ function TransportCompanyManager:_onMissionLoaded()
     self.isMissionLoaded = true
     self.isServer = g_server ~= nil
 
-    -- Load settings (shared + local).
+    -- Load the global/local-only settings (debugMode). Per-company
+    -- server-shared settings load when each company is created in
+    -- _scanForHqs / onHqChanged.
     -- NOTE: settings values live in settings.config and are read with
     -- settings:get(id). Reading them as plain fields (settings.enabled)
     -- always yields nil, which previously disabled every guarded code
@@ -201,7 +246,10 @@ function TransportCompanyManager:_onMissionLoaded()
     )
 end
 
----Find HQs that already exist in the world and register them.
+---Find HQs that already exist in the world and register them,
+---creating a per-farm company for each owner. Board regeneration is
+---suppressed here: saved contracts load after the scan, and the board
+---must not be pre-filled before that or it would exceed maxActive.
 ---Runs once the world is up, not at load: see _onMissionLoaded.
 function TransportCompanyManager:_scanForHqs()
     if g_currentMission == nil or g_currentMission.placeableSystem == nil then
@@ -215,7 +263,7 @@ function TransportCompanyManager:_scanForHqs()
             TransportCompanyHq, placeable.specializations
         ) then
             -- Placeables found by this scan exist and are live.
-            self:onHqChanged(placeable, true)
+            self:onHqChanged(placeable, true, true)
         end
     end
 end
@@ -238,31 +286,41 @@ function TransportCompanyManager:_onMissionStarted()
     -- without a reload.
     self:_ensureMissionStartup()
 
-    if not self.settings:get("enabled") then
-        TransportCompanyLog.info(
-            "TransportCompanyManager: company starts disabled - board fills when it is enabled")
-        return
+    -- Fill the board for every live company that starts enabled. A
+    -- company that starts disabled fills when it is turned on (the
+    -- enable path calls _regenerateContractBoard itself).
+    local filledAny = false
+    for farmId, company in pairs(self.companies) do
+        if company ~= nil and not company.isArchived
+           and company.settings:get("enabled") then
+            self:_regenerateContractBoard(farmId)
+            filledAny = true
+        end
     end
-
-    -- Fill the board if the save had none and an HQ is already standing.
-    self:_regenerateContractBoard()
+    if not filledAny then
+        TransportCompanyLog.info(
+            "TransportCompanyManager: no live company starts enabled - boards fill when enabled")
+    end
 
     TransportCompanyLog.info("TransportCompanyManager: _onMissionStarted() complete")
 end
 
----Run the one-per-session mission setup: load saved contracts, register
----existing HQs, start truck sampling and subscribe to hired-driver job
----completion. Called at mission start and never again for that mission
----(the _startupRan flag). The setup used to sit inside the enabled gate,
----so a company toggled on after starting disabled never enrolled trucks
----and never detected a hired driver finishing - both resumed only on a
----reload. Running it unconditionally keeps the enable path working.
+---Run the one-per-session mission setup: register existing HQs (which
+---creates each farm's company), load saved per-company state, start
+---truck sampling and subscribe to hired-driver job completion. Called
+---at mission start and never again for that mission (the _startupRan
+---flag). The setup used to sit inside the enabled gate, so a company
+---toggled on after starting disabled never enrolled trucks and never
+---detected a hired driver finishing - both resumed only on a reload.
+---Running it unconditionally keeps the enable path working.
 function TransportCompanyManager:_ensureMissionStartup()
     if self._startupRan then return end
     self._startupRan = true
 
-    self:_loadContracts()
+    -- Scan HQs FIRST: companies are created here, and _loadContracts
+    -- needs the company map to know which per-farm files to read.
     self:_scanForHqs()
+    self:_loadContracts()
     self:_startTruckSampling()
 
     -- Subscribe to AI job completion (hired-driver delivery).
@@ -298,12 +356,10 @@ function TransportCompanyManager:_onDeleteMission()
 
     self:_onMissionFinished()
 
-    self.contracts = {}
     self.hqPlaceables = {}
-    self.trucks = {}
-    self.stuckWatch = {}
+    self.companies = {}
+    self._lastBoardSnapshot = {}
     self.isMissionStarted = false
-    self.ledger = { revenue = 0, driverWages = 0, jobs = 0 }
     self.isMissionLoaded = false
     self._startupRan = false
     self._aiSubscribed = false
@@ -314,6 +370,11 @@ end
 ---Reload settings from disk (called from console command).
 function TransportCompanyManager:reloadSettings()
     self.settings:loadSettings()
+    for _, company in pairs(self.companies) do
+        if company ~= nil then
+            company.settings:loadSettings()
+        end
+    end
     TransportCompanyLog.info("TransportCompanyManager: settings reloaded")
 end
 
@@ -436,35 +497,56 @@ function TransportCompanyManager:_registerPdaPage()
     end
 end
 
----The farm that owns the company, taken from any placed HQ.
----Used for stock access when generating contracts.
+---The farm that owns the given HQ, from any placed HQ.
+---@param placeable table|nil
 ---@return number farmId, 0 when there is no HQ
-function TransportCompanyManager:_getCompanyFarmId()
-    for _, placeable in pairs(self.hqPlaceables) do
-        if placeable ~= nil and placeable.getOwnerFarmId ~= nil then
-            local farmId = placeable:getOwnerFarmId()
-            if farmId ~= nil and farmId > 0 then
-                return farmId
-            end
+function TransportCompanyManager:_getHqFarmId(placeable)
+    if placeable ~= nil and placeable.getOwnerFarmId ~= nil then
+        local farmId = placeable:getOwnerFarmId()
+        if farmId ~= nil and farmId > 0 then
+            return farmId
         end
     end
     return 0
 end
 
----Check whether the local player's own farm has at least one HQ.
+---The farm the current dispatch board belongs to: the local farm when
+---it owns a company, otherwise the first HQ-owning farm found.
+---Used for stock access when generating contracts.
+---@return number farmId, 0 when there is no company
+function TransportCompanyManager:_getCompanyFarmId()
+    local localFarmId = g_currentMission ~= nil and g_currentMission:getFarmId() or 0
+    if self:getCompany(localFarmId) ~= nil then
+        return localFarmId
+    end
+    for farmId, company in pairs(self.companies) do
+        if company ~= nil and not company.isArchived then
+            return farmId
+        end
+    end
+    return 0
+end
+
+---Check whether the given farm has at least one HQ.
 ---Drives the PDA tab's enabling predicate, so in multiplayer it must
 ---not be satisfied by a rival farm's headquarters.
+---@param farmId number|nil Defaults to the local farm
 ---@return boolean
-function TransportCompanyManager:_hasHq()
+function TransportCompanyManager:_hasHq(farmId)
     if g_currentMission == nil or g_currentMission.placeableSystem == nil then
         return false
     end
-    local farmId = g_currentMission:getFarmId()
+    if farmId == nil or farmId <= 0 then
+        farmId = g_currentMission:getFarmId()
+    end
     for _, placeable in pairs(g_currentMission.placeableSystem.placeables) do
         if placeable ~= nil and SpecializationUtil.hasSpecialization(
             TransportCompanyHq, placeable.specializations
-        ) and (farmId == nil or farmId <= 0 or placeable:getOwnerFarmId() == farmId) then
-            return true
+        ) then
+            local owner = self:_getHqFarmId(placeable)
+            if owner == farmId then
+                return true
+            end
         end
     end
     return false
@@ -473,7 +555,8 @@ end
 -- ── Hooks ──────────────────────────────────────
 
 ---Called by the TransportCompanyHq spec on placement, sell and
----delete. Regenerates the contract board when HQ presence changes.
+---delete. Creates/archives the per-farm company and regenerates its
+---contract board when HQ presence changes.
 ---
 ---@param placeable table The HQ placeable
 ---@param isActive boolean True when the HQ is now live, false when it
@@ -481,7 +564,9 @@ end
 ---       specialization is still attached during onSell/onDelete, so
 ---       testing hasSpecialization here would report every removal as
 ---       a placement and leave the sold HQ registered forever.
-function TransportCompanyManager:onHqChanged(placeable, isActive)
+---@param suppressBoard boolean|nil Skip board regeneration (used by the
+---       initial world scan, before saved contracts are loaded).
+function TransportCompanyManager:onHqChanged(placeable, isActive, suppressBoard)
     if placeable == nil then return end
 
     -- A placeable mid-teardown can have no uniqueId, and in LuaJIT
@@ -489,27 +574,48 @@ function TransportCompanyManager:onHqChanged(placeable, isActive)
     -- than index the table with it.
     local uniqueId = placeable:getUniqueId()
     if uniqueId == nil or uniqueId == "" then
-        self:_regenerateContractBoard()
+        local farmId = self:_getHqFarmId(placeable)
+        if farmId > 0 and isActive and not suppressBoard then
+            self:_regenerateContractBoard(farmId)
+        end
         return
     end
 
+    local farmId = self:_getHqFarmId(placeable)
+    local company = self:getOrCreateCompany(farmId)
+
     if isActive then
         self.hqPlaceables[uniqueId] = placeable
-        TransportCompanyLog.info("HQ placed: %s", uniqueId)
+        TransportCompanyLog.info("HQ placed: %s (farm %s)", uniqueId, tostring(farmId))
+        if company ~= nil then
+            if company.isArchived then
+                company:restore()
+                TransportCompanyLog.info("Company restored for farm %s", tostring(farmId))
+            end
+            -- Regenerate contract board to match HQ availability (not
+            -- during the initial scan: contracts load afterwards).
+            if not suppressBoard then
+                self:_regenerateContractBoard(farmId)
+            end
+        end
     else
         self.hqPlaceables[uniqueId] = nil
-        TransportCompanyLog.info("HQ removed: %s", uniqueId)
+        TransportCompanyLog.info("HQ removed: %s (farm %s)", uniqueId, tostring(farmId))
+        -- Archive the company only when this farm has no HQ left.
+        if company ~= nil and not self:_hasHq(farmId) then
+            company:archive()
+            TransportCompanyLog.info("Company archived for farm %s", tostring(farmId))
+        end
     end
-
-    -- Regenerate contract board to match HQ availability
-    self:_regenerateContractBoard()
 end
 
 -- ── Contract Board ─────────────────────────────
 
----Generate contracts up to maxActiveContracts, respecting HQ
----presence. Called on HQ change and on a timer.
-function TransportCompanyManager:_regenerateContractBoard()
+---Generate contracts up to maxActiveContracts for one farm's
+---company, respecting HQ presence. Called on HQ change and on a
+---timer. Server only.
+---@param farmId number Farm whose board should be topped up
+function TransportCompanyManager:_regenerateContractBoard(farmId)
     if not self.isServer then return end
 
     -- Nothing before the mission actually starts. Placeables exist during
@@ -520,67 +626,81 @@ function TransportCompanyManager:_regenerateContractBoard()
         TransportCompanyLog.debug("board: mission not started, deferring generation")
         return
     end
+
+    local company = self:getCompany(farmId)
+    if company == nil or company.isArchived then
+        TransportCompanyLog.debug("board: no live company for farm %s", tostring(farmId))
+        return
+    end
     -- A disabled company generates nothing, including on HQ change while
     -- it is switched off. The enable path calls this again, so the board
     -- fills the moment the company is turned back on.
-    if not self.settings:get("enabled") then
+    if not company.settings:get("enabled") then
         TransportCompanyLog.debug("board: company disabled, nothing generated")
         return
     end
-    if not self:_hasHq() then
+    if not self:_hasHq(farmId) then
         TransportCompanyLog.debug("board: no HQ, nothing generated")
         return
     end
 
-    local maxActive = self.settings:get("maxActiveContracts") or 5
+    local maxActive = company.settings:get("maxActiveContracts") or 5
     local activeCount = 0
 
-    for _, contract in pairs(self.contracts) do
+    for _, contract in pairs(company.contracts) do
         if contract.state == TransportCompanyContract.STATE_AVAILABLE or
            contract.state == TransportCompanyContract.STATE_ACCEPTED then
             activeCount = activeCount + 1
         end
     end
 
-    local deadlineDays = self.settings:get("contractDeadlineDays") or 7
-    local boardFarmId = self:_getCompanyFarmId()
+    local deadlineDays = company.settings:get("contractDeadlineDays") or 7
+    local added = 0
     while activeCount < maxActive do
-        local contract = TransportCompanyContract.generate(deadlineDays, boardFarmId)
+        local contract = TransportCompanyContract.generate(deadlineDays, farmId)
         if contract == nil then break end
-        self.contracts[contract.contractId] = contract
+        company.contracts[contract.contractId] = contract
         activeCount = activeCount + 1
+        added = added + 1
 
         -- Broadcast the new contract to all clients
         TransportCompanyContractEvent.sendEvent(
-            TransportCompanyContractEvent.TYPE_ADD, contract
+            TransportCompanyContractEvent.TYPE_ADD, contract, nil, farmId
         )
     end
 
     -- Always report, not just on a shortfall. A full board built entirely
     -- from non-AI routes looks healthy but leaves "Hire driver" refusing
-    -- every time, and that is invisible without these numbers.
+    -- every time, and that is invisible without these numbers. Gated so
+    -- the 30-second top-up timer does not spam the log with identical
+    -- lines every cycle — the diagnostics only print when something
+    -- actually changed.
     local ai, stocked, routes, stations, orphan =
-        TransportCompanyContract.countRoutes(boardFarmId)
-    TransportCompanyLog.info(
-        "board: %d/%d contracts (farm %s; %d loading stations, %d without a "
-        .. "placeable, %d routes, %d stocked, %d AI-haulable)",
-        activeCount, maxActive, tostring(boardFarmId),
-        stations, orphan, routes, stocked, ai
-    )
-    if ai == 0 and routes > 0 then
+        TransportCompanyContract.countRoutes(farmId)
+    local snapshot = string.format("%d/%d a%d s%d", activeCount, maxActive, ai, stocked)
+    if added > 0 or self._lastBoardSnapshot[farmId] ~= snapshot then
+        self._lastBoardSnapshot[farmId] = snapshot
         TransportCompanyLog.info(
-            "board: no AI-haulable route on this map for farm %s -- hired "
-            .. "drivers will be refused; these jobs must be hauled in person",
-            tostring(boardFarmId)
+            "board (farm %s): %d/%d contracts (added %d; %d loading stations, %d without a "
+            .. "placeable, %d routes, %d stocked, %d AI-haulable)",
+            tostring(farmId), activeCount, maxActive, added,
+            stations, orphan, routes, stocked, ai
         )
+        if ai == 0 and routes > 0 then
+            TransportCompanyLog.info(
+                "board (farm %s): no AI-haulable route on this map for farm %s -- hired "
+                .. "drivers will be refused; these jobs must be hauled in person",
+                tostring(farmId), tostring(farmId)
+            )
+        end
     end
 end
 
 -- ── Contract Persistence ──────────────────────
 
----Save contracts and the truck ledger to a dedicated XML file in
----the savegame directory. Called from the FSCareerMissionInfo save
----hook. Server-authoritative state, so only the server writes it.
+---Save every company's contracts and truck ledger to dedicated XML
+---files in the savegame directory. Called from the FSCareerMissionInfo
+---save hook. Server-authoritative state, so only the server writes it.
 ---
 ---Uses the XMLFile object API throughout. The contract and truck
 ---save/load methods call xmlFile:setString/:getInt etc., which only
@@ -590,19 +710,41 @@ end
 function TransportCompanyManager:_saveContracts()
     if not self.isMissionLoaded or not self.isServer then return end
 
-    local filePath = self:_getContractsFilePath()
-    if filePath == nil then return end
+    local anyFile = false
+    for farmId, company in pairs(self.companies) do
+        local filePath = self:_getContractsFilePath(farmId)
+        if filePath ~= nil then
+            local ok = self:_saveCompanyToFile(company, filePath)
+            if ok then anyFile = true end
+        end
+    end
+    if not anyFile then return end
+
+    -- Migrate a legacy (pre-per-farm) savegame file: once the new
+    -- per-company files have been written, the old single-file
+    -- transportCompany_contracts.xml is stale. It is left in place
+    -- (never deleted — the game may be rolled back) but load no
+    -- longer consults it once per-company files exist.
+end
+
+---Write one company's contracts, trucks and ledger to an XML file.
+---@param company TransportCompanyCompany
+---@param filePath string
+---@return boolean wrote
+function TransportCompanyManager:_saveCompanyToFile(company, filePath)
+    if company == nil or filePath == nil then return false end
 
     local xmlFile = XMLFile.create(
-        "transportCompanyContracts", filePath, "transportCompany"
+        "transportCompanyContracts_" .. tostring(company.farmId),
+        filePath, "transportCompany"
     )
     if xmlFile == nil then
         TransportCompanyLog.error("Could not create '%s'", filePath)
-        return
+        return false
     end
 
     local idx = 0
-    for _, contract in pairs(self.contracts) do
+    for _, contract in pairs(company.contracts) do
         contract:saveToXMLFile(
             xmlFile, string.format("transportCompany.contracts.contract(%d)", idx)
         )
@@ -610,29 +752,63 @@ function TransportCompanyManager:_saveContracts()
     end
 
     local truckIdx = 0
-    for _, truck in pairs(self.trucks) do
+    for _, truck in pairs(company.trucks) do
         truck:saveToXMLFile(
             xmlFile, string.format("transportCompany.trucks.truck(%d)", truckIdx)
         )
         truckIdx = truckIdx + 1
     end
 
-    xmlFile:setFloat("transportCompany.ledger#revenue", self.ledger.revenue)
-    xmlFile:setFloat("transportCompany.ledger#driverWages", self.ledger.driverWages)
-    xmlFile:setInt("transportCompany.ledger#jobs", self.ledger.jobs)
+    xmlFile:setFloat("transportCompany.ledger#revenue", company.ledger.revenue)
+    xmlFile:setFloat("transportCompany.ledger#driverWages", company.ledger.driverWages)
+    xmlFile:setInt("transportCompany.ledger#jobs", company.ledger.jobs)
 
     xmlFile:save()
     xmlFile:delete()
 
-    TransportCompanyLog.debug("Saved %d contracts, %d trucks", idx, truckIdx)
+    TransportCompanyLog.debug(
+        "Saved farm %s: %d contracts, %d trucks",
+        tostring(company.farmId), idx, truckIdx
+    )
+    return true
 end
 
----Load contracts and the truck ledger from the savegame XML file.
+---Load every company's contracts and truck ledger from the per-farm
+---savegame XML files. Falls back to a legacy pre-per-farm single file
+---for the first company found, so a 1.0.x save upgrades in place.
 function TransportCompanyManager:_loadContracts()
-    local filePath = self:_getContractsFilePath()
-    if filePath == nil or not fileExists(filePath) then return end
+    local loadedAny = false
+    local firstCompany = nil
+    for _, company in pairs(self.companies) do
+        if firstCompany == nil then firstCompany = company end
+        local filePath = self:_getContractsFilePath(company.farmId)
+        if filePath ~= nil and fileExists(filePath) then
+            self:_loadCompanyFromFile(company, filePath)
+            loadedAny = true
+        end
+    end
 
-    local xmlFile = XMLFile.load("transportCompanyContracts", filePath)
+    -- Legacy migration: no per-company files but a pre-per-farm file
+    -- exists. Attribute it to the first HQ-owning company.
+    if not loadedAny and firstCompany ~= nil then
+        local legacyPath = self:_getLegacyContractsFilePath()
+        if legacyPath ~= nil and fileExists(legacyPath) then
+            TransportCompanyLog.info(
+                "Migrating legacy single-file save into farm %s",
+                tostring(firstCompany.farmId)
+            )
+            self:_loadCompanyFromFile(firstCompany, legacyPath)
+        end
+    end
+end
+
+---Load one company from an XML file (contracts, trucks, ledger).
+---@param company TransportCompanyCompany
+---@param filePath string
+function TransportCompanyManager:_loadCompanyFromFile(company, filePath)
+    local xmlFile = XMLFile.load(
+        "transportCompanyContracts_" .. tostring(company.farmId), filePath
+    )
     if xmlFile == nil then return end
 
     local loaded, dropped, stale = 0, 0, 0
@@ -654,7 +830,7 @@ function TransportCompanyManager:_loadContracts()
         if isStale then
             stale = stale + 1
         elseif contract:_resolveStationRefs() then
-            self.contracts[contract.contractId] = contract
+            company.contracts[contract.contractId] = contract
             loaded = loaded + 1
         else
             dropped = dropped + 1
@@ -669,25 +845,39 @@ function TransportCompanyManager:_loadContracts()
         if uniqueId == nil or uniqueId == "" then break end
 
         local truck = TransportCompanyTruck.loadFromXMLFile(xmlFile, key)
-        self.trucks[truck.uniqueId] = truck
+        company.trucks[truck.uniqueId] = truck
         truckIdx = truckIdx + 1
     end
 
-    self.ledger.revenue = xmlFile:getFloat("transportCompany.ledger#revenue", 0)
-    self.ledger.driverWages = xmlFile:getFloat("transportCompany.ledger#driverWages", 0)
-    self.ledger.jobs = xmlFile:getInt("transportCompany.ledger#jobs", 0)
+    company.ledger.revenue = xmlFile:getFloat("transportCompany.ledger#revenue", 0)
+    company.ledger.driverWages = xmlFile:getFloat("transportCompany.ledger#driverWages", 0)
+    company.ledger.jobs = xmlFile:getInt("transportCompany.ledger#jobs", 0)
 
     xmlFile:delete()
 
     TransportCompanyLog.info(
-        "Loaded %d contracts (%d dropped, %d stale), %d trucks from savegame",
-        loaded, dropped, stale, truckIdx
+        "Loaded farm %s: %d contracts (%d dropped, %d stale), %d trucks from savegame",
+        tostring(company.farmId), loaded, dropped, stale, truckIdx
     )
 end
 
----Path of the mod's savegame file, or nil before a savegame exists.
+---Path of one farm's mod savegame file, or nil before a savegame exists.
+---@param farmId number
 ---@return string|nil
-function TransportCompanyManager:_getContractsFilePath()
+function TransportCompanyManager:_getContractsFilePath(farmId)
+    if g_currentMission == nil or g_currentMission.missionInfo == nil then
+        return nil
+    end
+    local savegameDir = g_currentMission.missionInfo.savegameDirectory
+    if savegameDir == nil or savegameDir == "" then
+        return nil
+    end
+    return savegameDir .. "/transportCompany_contracts_" .. tostring(farmId) .. ".xml"
+end
+
+---Path of the legacy pre-per-farm savegame file, or nil.
+---@return string|nil
+function TransportCompanyManager:_getLegacyContractsFilePath()
     if g_currentMission == nil or g_currentMission.missionInfo == nil then
         return nil
     end
@@ -708,9 +898,9 @@ function TransportCompanyManager:_startTruckSampling()
     self:_enrollTrucks()
 end
 
----Scan the live vehicle list and enroll every qualifying truck that
----is not already on the books. Nothing previously populated
----self.trucks, so the Fleet and Ledger tabs were permanently empty.
+---Scan the live vehicle list and enroll every qualifying truck into
+---the company of the farm that owns it. Nothing previously populated
+---the books, so the Fleet and Ledger tabs were permanently empty.
 ---
 ---A vehicle qualifies when Motorized classifies it as a truck
 ---(Motorized.lua:451-453) and it belongs to a real farm. Books for a
@@ -732,18 +922,22 @@ function TransportCompanyManager:_enrollTrucks()
             local farmId = vehicle:getOwnerFarmId()
             if uniqueId ~= nil and uniqueId ~= ""
                and farmId ~= nil and farmId > 0 then
-                local truck = self.trucks[uniqueId]
-                if truck == nil then
-                    truck = TransportCompanyTruck.new(vehicle)
-                    self.trucks[uniqueId] = truck
-                    TransportCompanyLog.debug(
-                        "Enrolled truck %s (%s)", uniqueId, truck.vehicleName
-                    )
-                end
-                if not truck.isEnrolled then
-                    truck.isEnrolled = true
-                    truck.farmId = farmId
-                    truck:beginSampling(vehicle)
+                local company = self:getOrCreateCompany(farmId)
+                if company ~= nil then
+                    local truck = company.trucks[uniqueId]
+                    if truck == nil then
+                        truck = TransportCompanyTruck.new(vehicle)
+                        company.trucks[uniqueId] = truck
+                        TransportCompanyLog.debug(
+                            "Enrolled truck %s (%s) for farm %s",
+                            uniqueId, truck.vehicleName, tostring(farmId)
+                        )
+                    end
+                    if not truck.isEnrolled then
+                        truck.isEnrolled = true
+                        truck.farmId = farmId
+                        truck:beginSampling(vehicle)
+                    end
                 end
             end
         end
@@ -755,7 +949,6 @@ end
 ---@param dt number Delta time in milliseconds
 function TransportCompanyManager:update(dt)
     if not self.isMissionLoaded then return end
-    if not self.settings:get("enabled") then return end
 
     -- Roster upkeep runs everywhere so clients can render the Fleet tab.
     self.enrollTimer = (self.enrollTimer or 0) + dt
@@ -790,40 +983,51 @@ function TransportCompanyManager:update(dt)
         self:_checkDeadlines()
     end
 
-    -- Watch hired drivers for a job that is driving but not actually
-    -- covering ground (blocked in traffic, stuck on an object, etc.)
-    -- and force a route replan when it has gone nowhere for too long.
-    self:_checkStuckDrivers(dt)
+    -- Per-company housekeeping: stuck-driver watch, board top-up,
+    -- books sync. Each runs for every live (enabled, unarchived)
+    -- company.
+    for farmId, company in pairs(self.companies) do
+        if company ~= nil and company:getIsActive() then
+            -- Watch hired drivers for a job that is driving but not
+            -- actually covering ground and force a route replan.
+            self:_checkStuckDrivers(company, dt)
 
-    -- Top the board up every 30s. Generation can legitimately fail
-    -- (a station demolished, no route for a fill type), and without a
-    -- retry the board would stay short until the next HQ change.
-    self.boardTimer = (self.boardTimer or 0) + dt
-    if self.boardTimer >= 30000 then
-        self.boardTimer = 0
-        self:_regenerateContractBoard()
-    end
+            -- Top the board up every 30s. Generation can legitimately
+            -- fail (a station demolished, no route for a fill type), and
+            -- without a retry the board would stay short until the next
+            -- HQ change.
+            company.boardTimer = (company.boardTimer or 0) + dt
+            if company.boardTimer >= 30000 then
+                company.boardTimer = 0
+                self:_regenerateContractBoard(farmId)
+            end
 
-    -- Keep client books current. Fuel and distance accumulate every
-    -- frame on the server, and there is no per-tick event for them, so
-    -- a snapshot is pushed periodically. Clients joining mid-game get
-    -- the current state within one interval instead of waiting for the
-    -- next payout.
-    self.booksSyncTimer = (self.booksSyncTimer or 0) + dt
-    if self.booksSyncTimer >= 30000 then
-        self.booksSyncTimer = 0
-        self:_broadcastBooks()
+            -- Keep client books current. Fuel and distance accumulate
+            -- every frame on the server, and there is no per-tick event
+            -- for them, so a snapshot is pushed periodically. Clients
+            -- joining mid-game get the current state within one interval
+            -- instead of waiting for the next payout.
+            company.booksSyncTimer = (company.booksSyncTimer or 0) + dt
+            if company.booksSyncTimer >= 30000 then
+                company.booksSyncTimer = 0
+                self:_broadcastBooks(farmId)
+            end
+        end
     end
 end
 
----Accumulate per-tick distance for every enrolled truck. Called every
----frame; see the note in update().
+---Accumulate per-tick distance for every enrolled truck across all
+---companies. Called every frame; see the note in update().
 function TransportCompanyManager:_sampleDistance()
-    for _, truck in pairs(self.trucks) do
-        if truck.isEnrolled then
-            local vehicle = truck:getVehicle()
-            if vehicle ~= nil and not vehicle:getIsBeingDeleted() then
-                truck:sampleDistance(vehicle)
+    for _, company in pairs(self.companies) do
+        if company ~= nil then
+            for _, truck in pairs(company.trucks) do
+                if truck.isEnrolled then
+                    local vehicle = truck:getVehicle()
+                    if vehicle ~= nil and not vehicle:getIsBeingDeleted() then
+                        truck:sampleDistance(vehicle)
+                    end
+                end
             end
         end
     end
@@ -831,19 +1035,23 @@ end
 
 ---Sample fuel for all enrolled trucks, and retire the ones that are gone.
 function TransportCompanyManager:_sampleTrucks(dt)
-    for _, truck in pairs(self.trucks) do
-        local vehicle = truck:getVehicle()
-        if vehicle ~= nil and not vehicle:getIsBeingDeleted() then
-            truck:sampleFuel(vehicle, dt)
-        elseif truck.isEnrolled then
-            -- Truck sold or deleted: stop sampling, keep the books.
-            truck.isEnrolled = false
+    for _, company in pairs(self.companies) do
+        if company ~= nil then
+            for _, truck in pairs(company.trucks) do
+                local vehicle = truck:getVehicle()
+                if vehicle ~= nil and not vehicle:getIsBeingDeleted() then
+                    truck:sampleFuel(vehicle, dt)
+                elseif truck.isEnrolled then
+                    -- Truck sold or deleted: stop sampling, keep the books.
+                    truck.isEnrolled = false
+                end
+            end
         end
     end
 end
 
----Check contract deadlines and expire overdue contracts.
----Expire overdue contracts and refill the board.
+---Check every company's contract deadlines and expire overdue
+---contracts, then refill the boards that changed.
 ---
 ---Both states time out, for different reasons. An ACCEPTED contract
 ---that runs out is a job the player failed, so it is marked EXPIRED
@@ -853,33 +1061,38 @@ end
 ---board froze with the same jobs forever and then slowly emptied.
 function TransportCompanyManager:_checkDeadlines()
     local now = g_currentMission.time
-    local changed = false
 
-    for contractId, contract in pairs(self.contracts) do
-        if contract:getIsExpired(now) then
-            if contract.state == TransportCompanyContract.STATE_ACCEPTED then
-                contract:expire()
-                TransportCompanyContractEvent.sendEvent(
-                    TransportCompanyContractEvent.TYPE_STATE_CHANGE, contract,
-                    TransportCompanyContract.STATE_EXPIRED
-                )
-                self:_notify(string.format(
-                    g_i18n:getText("transportCompany_contractExpired"),
-                    contract:getLocalizedFillType()
-                ))
-                changed = true
-            elseif contract.state == TransportCompanyContract.STATE_AVAILABLE then
-                self.contracts[contractId] = nil
-                TransportCompanyContractEvent.sendEvent(
-                    TransportCompanyContractEvent.TYPE_REMOVE, contract
-                )
-                changed = true
+    for farmId, company in pairs(self.companies) do
+        if company ~= nil and company:getIsActive() then
+            local changed = false
+
+            for contractId, contract in pairs(company.contracts) do
+                if contract:getIsExpired(now) then
+                    if contract.state == TransportCompanyContract.STATE_ACCEPTED then
+                        contract:expire()
+                        TransportCompanyContractEvent.sendEvent(
+                            TransportCompanyContractEvent.TYPE_STATE_CHANGE, contract,
+                            TransportCompanyContract.STATE_EXPIRED, farmId
+                        )
+                        self:_notify(string.format(
+                            g_i18n:getText("transportCompany_contractExpired"),
+                            contract:getLocalizedFillType()
+                        ), farmId)
+                        changed = true
+                    elseif contract.state == TransportCompanyContract.STATE_AVAILABLE then
+                        company.contracts[contractId] = nil
+                        TransportCompanyContractEvent.sendEvent(
+                            TransportCompanyContractEvent.TYPE_REMOVE, contract, nil, farmId
+                        )
+                        changed = true
+                    end
+                end
+            end
+
+            if changed then
+                self:_regenerateContractBoard(farmId)
             end
         end
-    end
-
-    if changed then
-        self:_regenerateContractBoard()
     end
 end
 
@@ -888,7 +1101,7 @@ end
 ---Server-side handler for an accept request. Reached from the PDA
 ---button (directly on a listen server, via TransportCompanyAcceptEvent
 ---from a client). Validates, accepts, and for MODE_HIRE also starts a
----base game AI job.
+---base game AI job. Operates on the requesting farm's company.
 ---@param contractId string
 ---@param mode number TransportCompanyAcceptEvent.MODE_SELF or MODE_HIRE
 ---@param farmId number
@@ -896,7 +1109,12 @@ end
 function TransportCompanyManager:onAcceptRequest(contractId, mode, farmId)
     if not self.isServer then return false end
 
-    local contract = self.contracts[contractId]
+    local company = self:getCompany(farmId)
+    if company == nil or company.isArchived then
+        return false
+    end
+
+    local contract = company.contracts[contractId]
     if contract == nil then
         return false
     end
@@ -912,7 +1130,7 @@ function TransportCompanyManager:onAcceptRequest(contractId, mode, farmId)
     -- a contract left AVAILABLE.
     if contract.state == TransportCompanyContract.STATE_ACCEPTED then
         if isHire and not contract.isHiredDriver and contract.farmId == farmId then
-            return self:_hireForAcceptedContract(contract, farmId)
+            return self:_hireForAcceptedContract(company, contract)
         end
         return false
     end
@@ -922,11 +1140,11 @@ function TransportCompanyManager:onAcceptRequest(contractId, mode, farmId)
     end
 
     -- The deadline clock starts now, not at generation time.
-    local deadlineDays = self.settings:get("contractDeadlineDays") or 7
+    local deadlineDays = company.settings:get("contractDeadlineDays") or 7
     contract.deadline = g_currentMission.time
         + TransportCompanyContract.DAY_LENGTH * deadlineDays
 
-    local truck = isHire and self:_findTruckForContract(contract, farmId) or nil
+    local truck = isHire and self:_findTruckForContract(company, contract, farmId) or nil
 
     if isHire then
         -- Check the job before touching contract state, so a refusal
@@ -935,7 +1153,7 @@ function TransportCompanyManager:onAcceptRequest(contractId, mode, farmId)
         if not haulable then
             TransportCompanyLog.info(
                 "Hire refused for %s: %s", tostring(contractId), tostring(reasonKey))
-            self:_notify(g_i18n:getText(reasonKey))
+            self:_notify(g_i18n:getText(reasonKey), farmId)
             return false
         end
     end
@@ -946,7 +1164,7 @@ function TransportCompanyManager:onAcceptRequest(contractId, mode, farmId)
             tostring(contractId), farmId
         )
         -- Say so: a button that silently does nothing reads as broken.
-        self:_notify(g_i18n:getText("transportCompany_noTruck"))
+        self:_notify(g_i18n:getText("transportCompany_noTruck"), farmId)
         return false
     end
 
@@ -955,7 +1173,7 @@ function TransportCompanyManager:onAcceptRequest(contractId, mode, farmId)
     end
 
     if isHire then
-        local started, reason = self:_dispatchHiredDriver(contract, truck)
+        local started, reason = self:_dispatchHiredDriver(company, contract, truck)
         if not started then
             -- Could not start the AI job — hand the contract back rather
             -- than leaving it accepted with no driver.
@@ -963,36 +1181,39 @@ function TransportCompanyManager:onAcceptRequest(contractId, mode, farmId)
             contract.isHiredDriver = false
             contract.acceptedTruckUniqueId = ""
             contract.farmId = 0
-            self:_notify(reason or g_i18n:getText("transportCompany_noTruck"))
+            self:_notify(reason or g_i18n:getText("transportCompany_noTruck"), farmId)
             return false
         end
     end
 
     TransportCompanyContractEvent.sendEvent(
-        TransportCompanyContractEvent.TYPE_UPDATE, contract
+        TransportCompanyContractEvent.TYPE_UPDATE, contract, nil, farmId
     )
     self:_notify(string.format(
         g_i18n:getText("transportCompany_contractAccepted"),
         contract:getLocalizedFillType(), contract.destName,
         g_i18n:formatMoney(contract.reward, 0, true, true)
-    ))
+    ), farmId)
     return true
 end
 
 ---Put a driver on a contract this farm already accepted.
+---@param company TransportCompanyCompany
+---@param contract TransportCompanyContract
 ---@return boolean started
-function TransportCompanyManager:_hireForAcceptedContract(contract, farmId)
+function TransportCompanyManager:_hireForAcceptedContract(company, contract)
+    local farmId = company.farmId
     local haulable, reasonKey = contract:getIsAiHaulable(farmId)
     if not haulable then
         TransportCompanyLog.info(
             "Hire refused for %s: %s", tostring(contract.contractId), tostring(reasonKey))
-        self:_notify(g_i18n:getText(reasonKey))
+        self:_notify(g_i18n:getText(reasonKey), farmId)
         return false
     end
 
-    local truck = self:_findTruckForContract(contract, farmId)
+    local truck = self:_findTruckForContract(company, contract, farmId)
     if truck == nil then
-        self:_notify(g_i18n:getText("transportCompany_noTruck"))
+        self:_notify(g_i18n:getText("transportCompany_noTruck"), farmId)
         return false
     end
 
@@ -1000,29 +1221,32 @@ function TransportCompanyManager:_hireForAcceptedContract(contract, farmId)
     contract.isHiredDriver = true
     contract.acceptedTruckUniqueId = truck.uniqueId
 
-    local started, reason = self:_dispatchHiredDriver(contract, truck)
+    local started, reason = self:_dispatchHiredDriver(company, contract, truck)
     if not started then
         -- Leave the contract accepted and player-hauled, as it was.
         contract.isHiredDriver = false
         contract.acceptedTruckUniqueId = previousTruck
-        self:_notify(reason or g_i18n:getText("transportCompany_noTruck"))
+        self:_notify(reason or g_i18n:getText("transportCompany_noTruck"), farmId)
         return false
     end
 
     TransportCompanyContractEvent.sendEvent(
-        TransportCompanyContractEvent.TYPE_UPDATE, contract
+        TransportCompanyContractEvent.TYPE_UPDATE, contract, nil, farmId
     )
     self:_notify(string.format(
         g_i18n:getText("transportCompany_driverDispatched"),
         truck.vehicleName or "", contract:getLocalizedFillType()
-    ))
+    ), farmId)
     return true
 end
 
 ---Pick an enrolled truck on this farm that the base game AI will
 ---actually accept for a load-and-deliver job.
+---@param company TransportCompanyCompany
+---@param contract TransportCompanyContract
+---@param farmId number
 ---@return TransportCompanyTruck|nil
-function TransportCompanyManager:_findTruckForContract(contract, farmId)
+function TransportCompanyManager:_findTruckForContract(company, contract, farmId)
     local probe = g_currentMission.aiJobTypeManager:createJob(AIJobType.LOAD_AND_DELIVER)
     if probe == nil then
         TransportCompanyLog.info("hire: could not create a LOAD_AND_DELIVER probe job")
@@ -1030,7 +1254,7 @@ function TransportCompanyManager:_findTruckForContract(contract, farmId)
     end
 
     local considered = 0
-    for _, truck in pairs(self.trucks) do
+    for _, truck in pairs(company.trucks) do
         if truck.farmId == farmId then
             considered = considered + 1
             local vehicle = truck:getVehicle()
@@ -1047,14 +1271,14 @@ function TransportCompanyManager:_findTruckForContract(contract, farmId)
 
     TransportCompanyLog.info(
         "hire: no usable truck on farm %s (%d considered, %d enrolled)",
-        tostring(farmId), considered, self:_countTrucks()
+        tostring(farmId), considered, self:_countTrucks(company)
     )
     return nil
 end
 
-function TransportCompanyManager:_countTrucks()
+function TransportCompanyManager:_countTrucks(company)
     local n = 0
-    for _ in pairs(self.trucks) do n = n + 1 end
+    for _ in pairs(company.trucks) do n = n + 1 end
     return n
 end
 
@@ -1108,8 +1332,11 @@ function TransportCompanyManager:_logHireRejection(truck, vehicle)
 end
 
 ---Build and start an AIJobLoadAndDeliver for a contract.
+---@param company TransportCompanyCompany
+---@param contract TransportCompanyContract
+---@param truck TransportCompanyTruck
 ---@return boolean started
-function TransportCompanyManager:_dispatchHiredDriver(contract, truck)
+function TransportCompanyManager:_dispatchHiredDriver(company, contract, truck)
     local vehicle = truck ~= nil and truck:getVehicle() or nil
     local sourceStation = contract:getSourceStation()
     local destStation = contract:getDestStation()
@@ -1161,9 +1388,9 @@ end
 
 -- ── Stuck-driver watchdog ───────────────────────
 
----Check every active hired-driver contract for a truck that is
----nominally driving but not making progress, and force a fresh route
----plan when it has been stuck too long.
+---Check every active hired-driver contract in one company for a
+---truck that is nominally driving but not making progress, and force
+---a fresh route plan when it has been stuck too long.
 ---
 ---Measures net displacement (straight-line distance between the start
 ---and end of a window), not cumulative distance travelled. A truck
@@ -1172,25 +1399,26 @@ end
 ---wheel movement over a window while its position barely changes, and
 ---summing lastMovedDistance let that jitter reset the timer every
 ---cycle, so the watchdog never fired.
+---@param company TransportCompanyCompany
 ---@param dt number Delta time in milliseconds
-function TransportCompanyManager:_checkStuckDrivers(dt)
-    for contractId, contract in pairs(self.contracts) do
+function TransportCompanyManager:_checkStuckDrivers(company, dt)
+    for contractId, contract in pairs(company.contracts) do
         local isActiveHiredDriver = contract.isHiredDriver
             and contract.state == TransportCompanyContract.STATE_ACCEPTED
             and contract.hiredDriverJobId ~= nil
             and contract.hiredDriverJobId > 0
 
         if not isActiveHiredDriver then
-            self.stuckWatch[contractId] = nil
+            company.stuckWatch[contractId] = nil
         else
             local job = g_currentMission.aiSystem:getJobById(contract.hiredDriverJobId)
-            local truck = self.trucks[contract.acceptedTruckUniqueId]
+            local truck = company.trucks[contract.acceptedTruckUniqueId]
             local vehicle = truck ~= nil and truck:getVehicle() or nil
 
             if job == nil or vehicle == nil or vehicle.rootNode == nil then
                 -- Job already gone (caught by _onAIServerJobStopped) or
                 -- truck no longer resolvable — nothing to watch.
-                self.stuckWatch[contractId] = nil
+                company.stuckWatch[contractId] = nil
             else
                 -- Only count time while the job is actually trying to
                 -- drive somewhere. Loading/unloading/waiting tasks are
@@ -1199,10 +1427,10 @@ function TransportCompanyManager:_checkStuckDrivers(dt)
                 local isDriving = currentTask ~= nil and currentTask.isa ~= nil
                     and currentTask:isa(AITaskDriveTo)
 
-                local watch = self.stuckWatch[contractId]
+                local watch = company.stuckWatch[contractId]
                 if watch == nil then
                     watch = { windowTimer = 0, anchorX = nil, anchorZ = nil, attempts = 0 }
-                    self.stuckWatch[contractId] = watch
+                    company.stuckWatch[contractId] = watch
                 end
 
                 if isDriving then
@@ -1221,7 +1449,7 @@ function TransportCompanyManager:_checkStuckDrivers(dt)
 
                             if netDistance < TransportCompanyManager.STUCK_MIN_DISTANCE_M then
                                 watch.attempts = watch.attempts + 1
-                                self:_replanStuckDriver(contract, truck, watch.attempts)
+                                self:_replanStuckDriver(company, contract, truck, watch.attempts)
                             else
                                 watch.attempts = 0
                             end
@@ -1249,10 +1477,12 @@ end
 ---a fresh one, which makes the engine recompute the route from the
 ---vehicle's current position instead of waiting on a jam that may
 ---never clear on its own.
+---@param company TransportCompanyCompany
 ---@param contract TransportCompanyContract
 ---@param truck TransportCompanyTruck|nil
 ---@param attempt number How many times this contract has been replanned
-function TransportCompanyManager:_replanStuckDriver(contract, truck, attempt)
+function TransportCompanyManager:_replanStuckDriver(company, contract, truck, attempt)
+    local farmId = company.farmId
     TransportCompanyLog.info(
         "Hired driver for contract %s looks stuck (attempt %d) — forcing a route replan",
         tostring(contract.contractId), attempt
@@ -1278,19 +1508,19 @@ function TransportCompanyManager:_replanStuckDriver(contract, truck, attempt)
             tostring(contract.contractId)
         )
         contract.isHiredDriver = false
-        self.stuckWatch[contract.contractId] = nil
+        company.stuckWatch[contract.contractId] = nil
         TransportCompanyContractEvent.sendEvent(
-            TransportCompanyContractEvent.TYPE_UPDATE, contract
+            TransportCompanyContractEvent.TYPE_UPDATE, contract, nil, farmId
         )
         self:_notify(string.format(
             g_i18n:getText("transportCompany_driverStuck"),
             (truck ~= nil and truck.vehicleName) or "", contract:getLocalizedFillType()
-        ))
+        ), farmId)
         self:_refreshDispatchUI()
         return
     end
 
-    local started, reason = self:_dispatchHiredDriver(contract, truck)
+    local started, reason = self:_dispatchHiredDriver(company, contract, truck)
     if not started then
         TransportCompanyLog.info(
             "Replan dispatch failed for contract %s: %s",
@@ -1341,7 +1571,8 @@ function TransportCompanyManager:_installDeliveryHooks()
     end
 end
 
----Credit goods that just arrived at a station against open contracts.
+---Credit goods that just arrived at a station against open contracts
+---of the delivering farm's company.
 ---Server-side only: contract state and payouts are authoritative.
 ---@param station table The receiving station
 ---@param farmId number Farm that delivered
@@ -1349,11 +1580,14 @@ end
 ---@param fillType number Fill type index
 function TransportCompanyManager:onGoodsDelivered(station, farmId, liters, fillType)
     if not self.isServer or not self.isMissionLoaded then return end
-    if not self.settings:get("enabled") then return end
     if station == nil or farmId == nil or farmId <= 0 then return end
 
+    local company = self:getCompany(farmId)
+    if company == nil or company.isArchived then return end
+    if not company.settings:get("enabled") then return end
+
     local remaining = liters
-    for _, contract in pairs(self.contracts) do
+    for _, contract in pairs(company.contracts) do
         if remaining <= 0 then break end
         if contract.state == TransportCompanyContract.STATE_ACCEPTED
            and contract.farmId == farmId
@@ -1364,10 +1598,10 @@ function TransportCompanyManager:onGoodsDelivered(station, farmId, liters, fillT
             if consumed > 0 then
                 remaining = remaining - consumed
                 if isComplete then
-                    self:_completeContract(contract)
+                    self:_completeContract(company, contract)
                 else
                     TransportCompanyContractEvent.sendEvent(
-                        TransportCompanyContractEvent.TYPE_UPDATE, contract
+                        TransportCompanyContractEvent.TYPE_UPDATE, contract, nil, farmId
                     )
                 end
             end
@@ -1380,14 +1614,16 @@ end
 ---hired driver's AI job finishing land here, and contract:complete()
 ---returns false on the second caller, so a contract can never pay
 ---twice.
-function TransportCompanyManager:_completeContract(contract)
+---@param company TransportCompanyCompany
+---@param contract TransportCompanyContract
+function TransportCompanyManager:_completeContract(company, contract)
     if not contract:complete() then return end
 
-    local truck = self.trucks[contract.acceptedTruckUniqueId]
+    local farmId = company.farmId
+    local truck = company.trucks[contract.acceptedTruckUniqueId]
 
     -- addMoney rejects farmId 0 outright ("Can't change money of
     -- spectator farm", FSBaseMission.lua:2006).
-    local farmId = contract.farmId
     if (farmId == nil or farmId <= 0) and truck ~= nil then
         farmId = truck.farmId
     end
@@ -1405,7 +1641,7 @@ function TransportCompanyManager:_completeContract(contract)
     -- finance screen readable.
     local driverCut = 0
     if contract.isHiredDriver then
-        local rewardShare = self.settings:get("hiredDriverRewardShare") or 20
+        local rewardShare = company.settings:get("hiredDriverRewardShare") or 20
         driverCut = math.floor(contract.reward * rewardShare / 100)
     end
     local companyRevenue = contract.reward - driverCut
@@ -1416,9 +1652,9 @@ function TransportCompanyManager:_completeContract(contract)
     end
 
     -- Company books always move, whether or not a truck was assigned.
-    self.ledger.revenue = self.ledger.revenue + companyRevenue
-    self.ledger.driverWages = self.ledger.driverWages + driverCut
-    self.ledger.jobs = self.ledger.jobs + 1
+    company.ledger.revenue = company.ledger.revenue + companyRevenue
+    company.ledger.driverWages = company.ledger.driverWages + driverCut
+    company.ledger.jobs = company.ledger.jobs + 1
 
     if truck ~= nil then
         truck:addRevenue(companyRevenue)
@@ -1439,32 +1675,44 @@ function TransportCompanyManager:_completeContract(contract)
     -- Push the updated ledger and truck books to clients in one
     -- authoritative snapshot (the money events above already nudge the
     -- per-truck numbers; the snapshot keeps the company totals right).
-    self:_broadcastBooks()
+    self:_broadcastBooks(farmId)
 
     TransportCompanyContractEvent.sendEvent(
         TransportCompanyContractEvent.TYPE_STATE_CHANGE, contract,
-        TransportCompanyContract.STATE_COMPLETED
+        TransportCompanyContract.STATE_COMPLETED, farmId
     )
     self:_notify(string.format(
         g_i18n:getText("transportCompany_contractDelivered"),
         contract:getLocalizedFillType(),
         g_i18n:formatMoney(companyRevenue, 0, true, true)
-    ))
+    ), farmId)
 
     TransportCompanyLog.info(
-        "Contract %s completed: reward=%d driverCut=%d company=%d",
-        contract.contractId, contract.reward, driverCut, companyRevenue
+        "Contract %s completed (farm %s): reward=%d driverCut=%d company=%d",
+        contract.contractId, tostring(farmId), contract.reward, driverCut, companyRevenue
     )
 
     -- Free the board slot so a fresh job appears.
-    self:_regenerateContractBoard()
+    self:_regenerateContractBoard(farmId)
 end
 
 ---Show a base-game side notification, when the player wants them.
 ---Needs a local HUD, which a dedicated server does not have — there
----the call is simply skipped.
-function TransportCompanyManager:_notify(text)
-    if not self.settings:get("showNotifications") then return end
+---the call is simply skipped. Notification preference is the company's
+---own showNotifications setting.
+---@param text string
+---@param farmId number|nil Company whose notification setting applies
+function TransportCompanyManager:_notify(text, farmId)
+    local show = true
+    if farmId ~= nil then
+        local company = self:getCompany(farmId)
+        if company ~= nil then
+            show = company.settings:get("showNotifications") ~= false
+        end
+    else
+        show = self.settings:get("showNotifications") ~= false
+    end
+    if not show then return end
     if g_currentMission == nil or g_currentMission.hud == nil then return end
     g_currentMission:addIngameNotification(FSBaseMission.INGAME_NOTIFICATION_OK, text)
 end
@@ -1485,37 +1733,41 @@ function TransportCompanyManager:_onAIServerJobStopped(job, aiMessage)
     if job == nil or aiMessage == nil then return end
 
     if aiMessage.isa and aiMessage:isa(AIMessageSuccessFinishedJob) then
-        for _, contract in pairs(self.contracts) do
-            if contract.isHiredDriver and contract.hiredDriverJobId == job.jobId then
-                self:_completeHiredDriverContract(contract, job)
-                break
+        for _, company in pairs(self.companies) do
+            for _, contract in pairs(company.contracts) do
+                if contract.isHiredDriver and contract.hiredDriverJobId == job.jobId then
+                    self:_completeHiredDriverContract(company, contract, job)
+                    break
+                end
             end
         end
         return
     end
 
-    for _, contract in pairs(self.contracts) do
-        if contract.isHiredDriver and contract.hiredDriverJobId == job.jobId then
-            if self._suppressReleaseForContractId == contract.contractId then
-                -- The watchdog is stopping this exact job on purpose so
-                -- it can immediately start a fresh one for the same
-                -- contract; don't hand control back to the player out
-                -- from under that redispatch.
-                return
-            end
+    for _, company in pairs(self.companies) do
+        for _, contract in pairs(company.contracts) do
+            if contract.isHiredDriver and contract.hiredDriverJobId == job.jobId then
+                if self._suppressReleaseForContractId == contract.contractId then
+                    -- The watchdog is stopping this exact job on purpose so
+                    -- it can immediately start a fresh one for the same
+                    -- contract; don't hand control back to the player out
+                    -- from under that redispatch.
+                    return
+                end
 
-            TransportCompanyLog.info(
-                "Hired driver job for contract %s ended without delivering — returning control",
-                tostring(contract.contractId)
-            )
-            contract.isHiredDriver = false
-            contract.hiredDriverJobId = 0
-            self.stuckWatch[contract.contractId] = nil
-            TransportCompanyContractEvent.sendEvent(
-                TransportCompanyContractEvent.TYPE_UPDATE, contract
-            )
-            self:_refreshDispatchUI()
-            break
+                TransportCompanyLog.info(
+                    "Hired driver job for contract %s ended without delivering — returning control",
+                    tostring(contract.contractId)
+                )
+                contract.isHiredDriver = false
+                contract.hiredDriverJobId = 0
+                company.stuckWatch[contract.contractId] = nil
+                TransportCompanyContractEvent.sendEvent(
+                    TransportCompanyContractEvent.TYPE_UPDATE, contract, nil, company.farmId
+                )
+                self:_refreshDispatchUI()
+                break
+            end
         end
     end
 end
@@ -1527,10 +1779,11 @@ end
 ---hook a player would trigger. This is the backstop for the case where
 ---the job reports success without a crediting tip, and it delegates to
 ---the one completion path so the driver's cut is applied identically.
+---@param company TransportCompanyCompany
 ---@param contract TransportCompanyContract
 ---@param job table The completed AI job
-function TransportCompanyManager:_completeHiredDriverContract(contract, job)
-    self:_completeContract(contract)
+function TransportCompanyManager:_completeHiredDriverContract(company, contract, job)
+    self:_completeContract(company, contract)
 end
 
 ---Book money against a farm. Server-only (addMoney refuses to run on
@@ -1548,28 +1801,32 @@ end
 
 -- ── Money Event Handling ──────────────────────
 
----Build and broadcast a full snapshot of the company ledger and every
----truck's books. Server only. Clients have no other source for fuel
----and distance (both are sampled per-tick on the server and never sent
----individually), and the ledger totals live only on the server, so
+---Build and broadcast a full snapshot of one company's ledger and
+---every truck's books. Server only. Clients have no other source for
+---fuel and distance (both are sampled per-tick on the server and never
+---sent individually), and the ledger totals live only on the server, so
 ---without this a client in multiplayer would show zero fuel, distance
 ---and company revenue in the Fleet and Ledger tabs.
 ---
 ---Sent on every contract completion (authoritative right after a
 ---payout) and periodically (see update()) so drifting figures and late
 ---joins converge within one interval.
-function TransportCompanyManager:_broadcastBooks()
+---@param farmId number Company whose books to broadcast
+function TransportCompanyManager:_broadcastBooks(farmId)
     if not self.isServer then return end
-    if next(self.trucks) == nil and self.ledger.jobs == 0 then
+
+    local company = self:getCompany(farmId)
+    if company == nil then return end
+    if next(company.trucks) == nil and company.ledger.jobs == 0 then
         return
     end
 
-    local event = TransportCompanyBooksEvent.new()
-    event.ledgerRevenue = self.ledger.revenue
-    event.ledgerDriverWages = self.ledger.driverWages
-    event.ledgerJobs = self.ledger.jobs
+    local event = TransportCompanyBooksEvent.new(farmId)
+    event.ledgerRevenue = company.ledger.revenue
+    event.ledgerDriverWages = company.ledger.driverWages
+    event.ledgerJobs = company.ledger.jobs
     event.trucks = {}
-    for uniqueId, truck in pairs(self.trucks) do
+    for uniqueId, truck in pairs(company.trucks) do
         table.insert(event.trucks, {
             uniqueId = uniqueId,
             vehicleName = truck.vehicleName or "",
@@ -1589,23 +1846,28 @@ end
 ---authoritative values. A truck the client has not enrolled yet gets a
 ---placeholder entry so the Fleet and Ledger tabs render immediately;
 ---_enrollTrucks replaces it with the live vehicle on its next pass.
-function TransportCompanyManager:onBooksEvent(event)
+---@param event TransportCompanyBooksEvent
+---@param farmId number Company the snapshot belongs to
+function TransportCompanyManager:onBooksEvent(event, farmId)
     if event == nil or self.isServer then return end
 
-    self.ledger.revenue = event.ledgerRevenue or 0
-    self.ledger.driverWages = event.ledgerDriverWages or 0
-    self.ledger.jobs = event.ledgerJobs or 0
+    local company = self:getOrCreateCompany(farmId)
+    if company == nil then return end
+
+    company.ledger.revenue = event.ledgerRevenue or 0
+    company.ledger.driverWages = event.ledgerDriverWages or 0
+    company.ledger.jobs = event.ledgerJobs or 0
 
     for _, t in ipairs(event.trucks or {}) do
         if t.uniqueId ~= nil and t.uniqueId ~= "" then
-            local truck = self.trucks[t.uniqueId]
+            local truck = company.trucks[t.uniqueId]
             if truck == nil then
                 truck = TransportCompanyTruck.new({
                     getUniqueId = function() return t.uniqueId end,
                     getFullName = function() return t.vehicleName or "Truck" end,
-                    getOwnerFarmId = function() return t.farmId or 0 end,
+                    getOwnerFarmId = function() return t.farmId or farmId end,
                 })
-                self.trucks[t.uniqueId] = truck
+                company.trucks[t.uniqueId] = truck
             end
             truck.revenue = t.revenue or 0
             truck.fuelCost = t.fuelCost or 0
@@ -1631,7 +1893,10 @@ function TransportCompanyManager:onMoneyEvent(moneyType, amount, farmId, contrac
     if self.isServer then return end
     if truckUniqueId == nil or truckUniqueId == "" then return end
 
-    local truck = self.trucks[truckUniqueId]
+    local company = self:getCompany(farmId)
+    if company == nil then return end
+
+    local truck = company.trucks[truckUniqueId]
     if truck == nil then return end
 
     if moneyType == TransportCompanyMoneyEvent.TYPE_CONTRACT_REWARD then
@@ -1649,6 +1914,7 @@ end
 ---@param eventType number (TYPE_ADD, TYPE_UPDATE, TYPE_STATE_CHANGE, TYPE_REMOVE)
 ---@param contract TransportCompanyContract|nil
 ---@param state number
+---@param farmId number Company the contract belongs to
 ---Refresh the Transport Company PDA page if the player currently has
 ---it open. Contract state changes driven by the server in the
 ---background — a completed delivery, an expired deadline, or the
@@ -1662,20 +1928,23 @@ function TransportCompanyManager:_refreshDispatchUI()
     end
 end
 
-function TransportCompanyManager:onContractEvent(eventType, contract, state)
+function TransportCompanyManager:onContractEvent(eventType, contract, state, farmId)
     if contract == nil then return end
 
+    local company = self:getOrCreateCompany(farmId)
+    if company == nil then return end
+
     if eventType == TransportCompanyContractEvent.TYPE_ADD then
-        self.contracts[contract.contractId] = contract
+        company.contracts[contract.contractId] = contract
     elseif eventType == TransportCompanyContractEvent.TYPE_UPDATE then
-        self.contracts[contract.contractId] = contract
+        company.contracts[contract.contractId] = contract
     elseif eventType == TransportCompanyContractEvent.TYPE_STATE_CHANGE then
         contract.state = state
         if state == TransportCompanyContract.STATE_COMPLETED then
-            self:_cleanupCompletedContracts()
+            self:_cleanupCompletedContracts(company)
         end
     elseif eventType == TransportCompanyContractEvent.TYPE_REMOVE then
-        self.contracts[contract.contractId] = nil
+        company.contracts[contract.contractId] = nil
     end
 
     self:_refreshDispatchUI()
@@ -1683,15 +1952,16 @@ end
 
 ---Remove contracts that are completed/expired and older than
 ---7 days to keep the savegame XML lean.
-function TransportCompanyManager:_cleanupCompletedContracts()
+---@param company TransportCompanyCompany
+function TransportCompanyManager:_cleanupCompletedContracts(company)
     local now = g_currentMission.time
     local maxAge = TransportCompanyContract.DAY_LENGTH * 7
 
-    for contractId, contract in pairs(self.contracts) do
+    for contractId, contract in pairs(company.contracts) do
         if contract.state == TransportCompanyContract.STATE_COMPLETED or
            contract.state == TransportCompanyContract.STATE_EXPIRED then
             if contract.completedTime > 0 and (now - contract.completedTime) > maxAge then
-                self.contracts[contractId] = nil
+                company.contracts[contractId] = nil
             end
         end
     end
@@ -1763,14 +2033,21 @@ function TransportCompanyManager:consoleCommandGenerateContract()
         return
     end
 
+    local farmId = self:_getCompanyFarmId()
+    local company = self:getCompany(farmId)
+    if company == nil then
+        print("TransportCompany: no company (place an HQ first)")
+        return
+    end
+
     local contract = TransportCompanyContract.generate(
-        self.settings:get("contractDeadlineDays") or 7,
-        self:_getCompanyFarmId()
+        company.settings:get("contractDeadlineDays") or 7,
+        farmId
     )
     if contract then
-        self.contracts[contract.contractId] = contract
+        company.contracts[contract.contractId] = contract
         TransportCompanyContractEvent.sendEvent(
-            TransportCompanyContractEvent.TYPE_ADD, contract
+            TransportCompanyContractEvent.TYPE_ADD, contract, nil, farmId
         )
         local typeStr = contract.contractType == TransportCompanyContract.CONTRACT_TYPE_PALLET
             and "pallet" or "bulk"
@@ -1784,8 +2061,13 @@ function TransportCompanyManager:consoleCommandGenerateContract()
 end
 
 function TransportCompanyManager:consoleCommandListContracts()
+    local company = self:getLocalCompany()
+    if company == nil then
+        print("TransportCompany: no company for your farm (place an HQ first)")
+        return
+    end
     local count = 0
-    for id, contract in pairs(self.contracts) do
+    for id, contract in pairs(company.contracts) do
         count = count + 1
         local typeStr = contract.contractType == TransportCompanyContract.CONTRACT_TYPE_PALLET
             and "pallet" or "bulk"
@@ -1799,8 +2081,13 @@ function TransportCompanyManager:consoleCommandListContracts()
 end
 
 function TransportCompanyManager:consoleCommandListTrucks()
+    local company = self:getLocalCompany()
+    if company == nil then
+        print("TransportCompany: no company for your farm (place an HQ first)")
+        return
+    end
     local count = 0
-    for uniqueId, truck in pairs(self.trucks) do
+    for uniqueId, truck in pairs(company.trucks) do
         count = count + 1
         print(string.format(
             "  %s (%s): revenue=%d fuel=%d dist=%d jobs=%d profit=%d",
@@ -1899,33 +2186,48 @@ end
 
 ---Throw the whole board away and build a fresh one. Useful after a
 ---generation change, when a save still holds contracts the current
----rules would never have produced.
+---rules would never have produced. Operates on the calling farm's
+---company.
 function TransportCompanyManager:consoleCommandResetBoard()
     if not self.isServer then
         print("TransportCompany: only the server can reset the board")
         return
     end
 
+    local farmId = self:_getCompanyFarmId()
+    local company = self:getCompany(farmId)
+    if company == nil then
+        print("TransportCompany: no company (place an HQ first)")
+        return
+    end
+
     local removed = 0
-    for id, contract in pairs(self.contracts) do
+    for id, contract in pairs(company.contracts) do
         if contract.state ~= TransportCompanyContract.STATE_COMPLETED then
-            self.contracts[id] = nil
+            company.contracts[id] = nil
             removed = removed + 1
         end
     end
 
-    self:_regenerateContractBoard()
+    self:_regenerateContractBoard(farmId)
 
     local now = 0
-    for _ in pairs(self.contracts) do now = now + 1 end
+    for _ in pairs(company.contracts) do now = now + 1 end
     print(string.format(
         "TransportCompany: cleared %d contract(s), board now holds %d",
         removed, now))
 end
 
 function TransportCompanyManager:consoleCommandResetSettings()
+    -- Reset the global/local-only settings (debugMode) and the calling
+    -- farm's company settings.
     self.settings:resetToDefaults()
     self.settings:save()
+    local company = self:getLocalCompany()
+    if company ~= nil then
+        company.settings:resetToDefaults()
+        company.settings:save()
+    end
     print("TransportCompany: settings reset to defaults")
 end
 

@@ -6,6 +6,9 @@
 -- Server-shared settings (contract board size, deadline length,
 -- notifications) are saved into the server savegame directory so
 -- every player in a multiplayer game uses the same company rules.
+-- They are per-COMPANY: each farm that owns an HQ carries its own
+-- board size, deadline and wage share (see TransportCompanyCompany),
+-- so the shared file is named per farm.
 --
 -- Local-only settings (debug output) are saved per-player into the
 -- user profile (modSettings/FS25_TransportCompany/...) so they
@@ -146,8 +149,9 @@ end
 
 -- ── Instance ────────────────────────────────────────────────
 
-function TransportCompanySettings.new()
+function TransportCompanySettings.new(farmId)
     local self = setmetatable({}, TransportCompanySettings_mt)
+    self.farmId = farmId or nil
     self:resetToDefaults()
     return self
 end
@@ -172,12 +176,17 @@ end
 
 -- ── Paths ───────────────────────────────────────────────────
 
---- Server-shared config path: next to the current savegame.
---- Returns nil before the savegame directory exists (new career).
+--- Server-shared config path: next to the current savegame, one
+--- file per company (per farm). Returns nil before the savegame
+--- directory exists (new career) or when this instance holds no
+--- farmId (a manager-level local-only settings holder).
 function TransportCompanySettings:getSavegameXmlFilePath()
+    if self.farmId == nil or self.farmId <= 0 then
+        return nil
+    end
     local missionInfo = g_currentMission ~= nil and g_currentMission.missionInfo
     if missionInfo ~= nil and missionInfo.savegameDirectory ~= nil then
-        return string.format("%s/%s.xml", missionInfo.savegameDirectory, modName)
+        return string.format("%s/%s_%d.xml", missionInfo.savegameDirectory, modName, self.farmId)
     end
     return nil
 end

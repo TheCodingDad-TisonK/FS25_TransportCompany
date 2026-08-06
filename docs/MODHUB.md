@@ -34,7 +34,7 @@ Then run the **GIANTS TestRunner** on the same zip. It is the authority;
 |---|---|
 | **Mod name** | Transport Company |
 | **Zip filename** | `FS25_TransportCompany.zip` |
-| **Version** | 1.0.1.0 |
+| **Version** | 2.0.0.0 |
 | **Author** | TisonK |
 | **Platform** | PC / Mac |
 | **Category** | Gameplay / Placeables |
@@ -83,7 +83,8 @@ Company totals plus a history of every finished and expired contract.
 
 SETTINGS
 Board size, deadline, driver wage share and notifications, all editable in
-game. In multiplayer only the host can change them.
+game. In multiplayer each farm that owns an HQ runs its own company with its
+own settings; only the host can change them.
 
 Everything uses stock FS25 behaviour: the base AI, the base finance system,
 base menu widgets, savegame persistence and multiplayer.
@@ -150,6 +151,14 @@ erfasst. Viele Fahrzeuge gelten als Traktor und erscheinen nicht.
 ## 4. Changelog
 
 ```
+v2.0.0.0
+- Per-farm companies: in multiplayer, every farm that owns an HQ now runs its
+  own dispatch board, its own fleet and its own ledger
+- Each company keeps its own board size, deadline, wage share and notification
+  settings; debug logging stays a per-player setting
+- Saved games are now stored per farm and upgrade in place from 1.x saves
+- Board diagnostics no longer spam the log on the 30-second top-up cycle
+
 v1.0.1.0
 - Hired drivers can now be stopped and reassigned from the dispatch office
 - A driver stuck in traffic or against an object is watched and its route is

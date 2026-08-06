@@ -7,7 +7,9 @@
 -- manager only mutates contracts on the server; hired-driver AI
 -- jobs are server-side too). This event broadcasts the relevant
 -- contract so every client can render the PDA dispatch board and
--- run deadline/notification logic locally.
+-- run deadline/notification logic locally. It carries the farmId
+-- of the company the contract belongs to, so in multiplayer each
+-- farm only applies events for its own board.
 --
 -- Mirrors the proven FS25 event pattern used by the user's other
 -- mods (InitEventClass + emptyNew/new + writeStream/readStream/run,
@@ -28,20 +30,21 @@ function TransportCompanyContractEvent.emptyNew()
     return Event.new(TransportCompanyContractEvent_mt)
 end
 
-function TransportCompanyContractEvent.new(eventType, contract, state)
+function TransportCompanyContractEvent.new(eventType, contract, state, farmId)
     local self = TransportCompanyContractEvent.emptyNew()
     self.eventType = eventType
     self.contract = contract
     self.state = state
+    self.farmId = farmId
     return self
 end
 
 --- Broadcast to all connected clients (server only).
-function TransportCompanyContractEvent.sendEvent(eventType, contract, state)
+function TransportCompanyContractEvent.sendEvent(eventType, contract, state, farmId)
     if g_server == nil then
         return
     end
-    g_server:broadcastEvent(TransportCompanyContractEvent.new(eventType, contract, state))
+    g_server:broadcastEvent(TransportCompanyContractEvent.new(eventType, contract, state, farmId))
 end
 
 function TransportCompanyContractEvent:writeStream(streamId, connection)
@@ -54,6 +57,7 @@ function TransportCompanyContractEvent:writeStream(streamId, connection)
         contract:writeStream(streamId, connection)
     end
     streamWriteInt8(streamId, self.state or TransportCompanyContract.STATE_AVAILABLE)
+    streamWriteInt32(streamId, self.farmId or 0)
 end
 
 function TransportCompanyContractEvent:readStream(streamId, connection)
@@ -65,6 +69,7 @@ function TransportCompanyContractEvent:readStream(streamId, connection)
         self.contract = nil
     end
     self.state = streamReadInt8(streamId)
+    self.farmId = streamReadInt32(streamId)
     self:run(connection)
 end
 
@@ -72,5 +77,7 @@ function TransportCompanyContractEvent:run(connection)
     if g_transportCompanyManager == nil then
         return
     end
-    g_transportCompanyManager:onContractEvent(self.eventType, self.contract, self.state)
+    g_transportCompanyManager:onContractEvent(
+        self.eventType, self.contract, self.state, self.farmId
+    )
 end
