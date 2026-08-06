@@ -28,7 +28,15 @@ MoneyType = { MISSIONS = "m", AI = "ai" }
 InputAction = { MENU_BACK = 1, MENU_ACTIVATE = 2, MENU_EXTRA_1 = 3 }
 g_currentMission = { time = 5000, getFarmId = function() return 1 end }
 g_i18n = {
-    getText = function(_, k) return k end,
+    getText = function(_, k)
+        -- Return a body value containing a literal backslash-n (as the
+        -- l10n files store it) for the first page, to exercise the
+        -- escape-to-newline conversion in showPage.
+        if k == "transportCompany_helpPageStartBody" then
+            return "Line one\\nLine two"
+        end
+        return k
+    end,
     formatMoney = function(_, v) return tostring(v) end,
     formatDistance = function(_, v) return tostring(v) end,
 }
@@ -273,6 +281,13 @@ ok(help.currentPage == 1, "starts on page 1")
 ok(help.titleText.v ~= "" and help.bodyText.v ~= "", "page 1 has title and body")
 ok(help.pageCounter.v == "1 / " .. #TransportCompanyHelpDialog.PAGES, "counter shows position",
    help.pageCounter.v)
+-- The l10n value holds a literal backslash-n; showPage must turn it into
+-- a real newline so the dialog does not print "\n" to the player.
+ok(help.bodyText.v == "Line one\nLine two",
+   "literal \\n in l10n is rendered as a real newline",
+   string.format("%q", help.bodyText.v))
+ok(not string.find(help.bodyText.v, "\\n", 1, true),
+   "no literal backslash-n reaches the dialog text")
 help:showPage(2)
 ok(help.currentPage == 2, "next page advances")
 help:onClickPrev()

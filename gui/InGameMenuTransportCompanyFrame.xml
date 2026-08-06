@@ -83,13 +83,15 @@
 		  that is what was clamping the text.
 		-->
 		<Profile name="fs25_tcListPrimary" extends="fs25_textDarkHighlight" with="anchorTopLeft">
-			<size value="268px 32px"/>
+			<size value="268px 40px"/>
 			<position value="100px -18px"/>
 			<textSize value="24px"/>
+			<textWrapWidth value="260px"/>
+			<textMaxNumLines value="2"/>
 		</Profile>
 		<Profile name="fs25_tcListLeft" extends="fs25_textDarkHighlight" with="anchorBottomLeft">
 			<size value="150px 28px"/>
-			<position value="100px 26px"/>
+			<position value="100px 38px"/>
 			<textSize value="22px"/>
 			<textVerticalAlignment value="bottom"/>
 			<textColor value="$preset_fs25_colorMainHighlight"/>
@@ -98,7 +100,7 @@
 		</Profile>
 		<Profile name="fs25_tcListRight" extends="fs25_textDarkHighlight" with="anchorBottomRight">
 			<size value="150px 28px"/>
-			<position value="-38px 26px"/>
+			<position value="-38px 38px"/>
 			<textSize value="22px"/>
 			<textAlignment value="right"/>
 		</Profile>
@@ -114,41 +116,51 @@
 			<position value="170px 0px"/>
 		</Profile>
 		<Profile name="fs25_tcDetailTitle" extends="fs25_textDefault" with="anchorTopStretchingX">
-			<size value="100% 44px"/>
+			<size value="100% 64px"/>
 			<position value="0px -20px"/>
 			<textSize value="32px"/>
 			<textBold value="true"/>
 			<textUpperCase value="true"/>
 			<textAlignment value="center"/>
 			<textColor value="$preset_fs25_colorMainHighlight"/>
+			<textWrapWidth value="840px"/>
+			<textMaxNumLines value="2"/>
 		</Profile>
 		<Profile name="fs25_tcDetailSubtitle" extends="fs25_textGrey" with="anchorTopStretchingX">
-			<size value="100% 32px"/>
-			<position value="0px -66px"/>
+			<size value="100% 56px"/>
+			<position value="0px -84px"/>
 			<textSize value="24px"/>
 			<textAlignment value="center"/>
+			<!-- Setting descriptions are a full sentence and must wrap,
+			     not clip to one line. -->
+			<textWrapWidth value="840px"/>
+			<textMaxNumLines value="2"/>
 		</Profile>
 		<Profile name="fs25_tcDetailList" extends="emptyPanel" with="anchorTopCenter">
-			<size value="100% 300px"/>
+			<size value="100% 260px"/>
 			<absoluteSizeOffset value="40px 0px"/>
-			<position value="0px -116px"/>
+			<position value="0px -148px"/>
 			<handleFocus value="false"/>
 		</Profile>
 		<Profile name="fs25_tcDetailItem" extends="baseReference" with="anchorTopStretchingX alternating">
-			<height value="40px"/>
+			<height value="44px"/>
 			<imageColor value="$preset_fs25_colorGrey"/>
 			<alternateBackgroundColor value="$preset_fs25_colorGreyDark_50"/>
 		</Profile>
 		<Profile name="fs25_tcDetailLabel" extends="fs25_textDefault" with="anchorTopLeft">
-			<height value="40px"/>
+			<size value="50% 44px"/>
 			<textOffset value="14px 0px"/>
+			<textWrapWidth value="400px"/>
+			<textMaxNumLines value="2"/>
 		</Profile>
 		<Profile name="fs25_tcDetailValue" extends="fs25_textDefault" with="anchorTopRight">
-			<height value="40px"/>
+			<size value="50% 44px"/>
 			<textBold value="true"/>
 			<textAlignment value="right"/>
 			<textOffset value="-14px 0px"/>
 			<textColor value="$preset_fs25_colorMainHighlight"/>
+			<textWrapWidth value="400px"/>
+			<textMaxNumLines value="2"/>
 		</Profile>
 		<Profile name="fs25_tcProgressLabel" extends="fs25_textDefault" with="anchorTopCenter">
 			<size value="820px 30px"/>

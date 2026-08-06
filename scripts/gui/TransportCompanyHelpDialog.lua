@@ -67,7 +67,12 @@ function TransportCompanyHelpDialog:showPage(page)
         self.titleText:setText(g_i18n:getText(entry.titleKey))
     end
     if self.bodyText ~= nil then
-        self.bodyText:setText(g_i18n:getText(entry.bodyKey))
+        -- The l10n files cannot carry raw newlines inside an XML
+        -- attribute, so the guide text stores the escape sequence \n
+        -- and it is turned into a real newline here at render time.
+        local body = g_i18n:getText(entry.bodyKey)
+        body = body:gsub("\\n", "\n")
+        self.bodyText:setText(body)
     end
     if self.pageCounter ~= nil then
         self.pageCounter:setText(string.format("%d / %d", self.currentPage, count))
