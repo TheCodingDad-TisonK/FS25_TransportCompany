@@ -34,7 +34,7 @@ Then run the **GIANTS TestRunner** on the same zip. It is the authority;
 |---|---|
 | **Mod name** | Transport Company |
 | **Zip filename** | `FS25_TransportCompany.zip` |
-| **Version** | 2.2.0.0 |
+| **Version** | 3.0.0.0 |
 | **Author** | TisonK |
 | **Platform** | PC / Mac |
 | **Category** | Gameplay / Placeables |
@@ -57,7 +57,7 @@ Your map is already full of silos, dairies and mills moving goods between them.
 None of it pays you a penny. Buy a headquarters and it does.
 
 Buy the Transport Company HQ from the shop (Buildings > Sheds) and place it on
-your farm. The dispatch office opens in the in-game menu with four sections:
+your farm. The dispatch office opens in the in-game menu with five sections:
 
 DISPATCH
 Freight jobs generated from the loading and unloading stations that already
@@ -81,10 +81,18 @@ FLEET
 Every truck keeps its own books: distance driven, diesel burned valued at the
 live economy price, revenue earned, driver wages paid and jobs completed.
 Jobs you haul yourself are credited to the truck that tipped, alongside
-hired-driver runs. Trucks enrol themselves as soon as you buy them.
+hired-driver runs. Trucks enrol themselves as soon as you buy them, and the
+Fleet tab tells you when a truck is due its next service.
+
+DRIVERS
+Hire named drivers, assign them to trucks and watch their experience grow with
+every completed contract. They are paid a weekly wage out of the farm balance.
+Your reputation — earned by delivering on time — decides how many drivers you
+may employ, and upgrading the headquarters raises it further.
 
 LEDGER
-Company totals plus a history of every finished and expired contract.
+Company totals plus a history of every finished and expired contract, and a
+rolling weekly profit and loss so you can see the company trending.
 
 SETTINGS
 Board size, deadline, driver wage share and notifications, all editable in
@@ -156,6 +164,14 @@ erfasst. Viele Fahrzeuge gelten als Traktor und erscheinen nicht.
 ## 4. Changelog
 
 ```
+v3.0.0.0
+- Run a real business: hire named drivers with weekly wages and growing
+  experience, assign them to trucks, and grow your reputation by delivering
+  on time
+- Upgrade your headquarters for a bigger board and more driver capacity
+- Trucks need a service every 5000 km, tracked in the Fleet tab
+- The ledger now shows a rolling weekly profit and loss
+
 v2.2.0
 - Deliveries you haul yourself are now credited to the truck that tipped,
   so the Fleet tab shows revenue and job counts for your own driving too,

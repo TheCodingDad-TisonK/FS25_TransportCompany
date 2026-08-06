@@ -81,6 +81,18 @@ The base game only keeps farm-wide statistics. This tracks every truck separatel
 
 Trucks enrol themselves. Anything the base game classes as a truck and your farm owns appears in the Fleet tab within a few seconds of purchase.
 
+### 💼 Run A Business
+
+Beyond the board, the company runs like one — hire people, grow, spend, and watch the books.
+
+| System | What it does |
+|---|---|
+| 🧑‍🤝‍🧑 **Named drivers** | Hire drivers from the **Drivers** tab. Each has a name, a weekly wage and experience that grows with every completed contract (and raises their wage). Assign one to a truck and hired-driver jobs on that truck ride their record. |
+| ⭐ **Reputation & level** | Delivering on time builds reputation; missing a deadline costs it. Higher reputation means more drivers on the payroll. |
+| 🏢 **HQ upgrades** | Spend money to raise the HQ tier — bigger board, more drivers. |
+| 🔧 **Maintenance** | Trucks need a service every 5000 km. The Fleet tab tells you when one is due; skipping it never stops the truck, but the bill catches up in the books. |
+| 📈 **Weekly P&L** | The Ledger shows a rolling weekly profit-and-loss so you can see the company trending, not just the lifetime totals. |
+
 ### 📖 Company Ledger
 
 Revenue, driver wages, fuel, distance and job count for the company as a whole, followed by a history of every finished and expired contract, newest first.
@@ -89,13 +101,14 @@ Company figures are tracked separately from the fleet on purpose — a load you 
 
 ### 📱 Dispatch Office
 
-Four tabs in the in-game menu, built from stock FS25 menu widgets so it looks and behaves like the rest of the game.
+Five tabs in the in-game menu, built from stock FS25 menu widgets so it looks and behaves like the rest of the game.
 
 | Tab | Shows |
 |---|---|
 | 📋 **Dispatch** | Open jobs, with full route and progress detail |
 | 🚚 **Fleet** | Every enrolled truck and its books |
-| 📖 **Ledger** | Company totals and completed job history |
+| 💼 **Drivers** | The payroll: hire, assign and fire named drivers |
+| 📖 **Ledger** | Company totals, weekly P&L and completed job history |
 | ⚙️ **Settings** | Everything below, editable in-game |
 
 ---
@@ -128,6 +141,8 @@ Available with the developer console enabled.
 | `tc_generate_contract` | Force a job onto the board |
 | `tc_list_contracts` | List ids, states and progress |
 | `tc_list_trucks` | List what actually enrolled |
+| `tc_drivers` | List the payroll, reputation and HQ tier |
+| `tc_hire_driver` | Hire a named driver (debug) |
 | `tc_reset_settings` | Reset settings to defaults |
 | `tc_stations` | List every loading station, its stock and whether the AI can load there |
 | `tc_reset_board` | Clear the board and regenerate it |
@@ -208,7 +223,7 @@ This mod is licensed under **[CC BY-NC-ND 4.0](https://creativecommons.org/licen
 
 You may share it in its original form with attribution. You may not sell it, modify and redistribute it, or reupload it under a different name or authorship. Contributions via pull request are explicitly permitted and encouraged.
 
-**Author:** TisonK &nbsp;·&nbsp; **Version:** 2.2.0.0
+**Author:** TisonK &nbsp;·&nbsp; **Version:** 3.0.0.0
 
 © 2026 TisonK - See [LICENSE](LICENSE) for full terms.
 

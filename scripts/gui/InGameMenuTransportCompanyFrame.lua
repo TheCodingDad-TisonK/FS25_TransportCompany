@@ -32,6 +32,7 @@ InGameMenuTransportCompanyFrame.TAB_DISPATCH = 1
 InGameMenuTransportCompanyFrame.TAB_FLEET = 2
 InGameMenuTransportCompanyFrame.TAB_LEDGER = 3
 InGameMenuTransportCompanyFrame.TAB_SETTINGS = 4
+InGameMenuTransportCompanyFrame.TAB_DRIVERS = 5
 
 -- Bare l10n keys. g_i18n:getText expects the key itself — the
 -- "$l10n_" prefix is only for XML attribute values.
@@ -39,7 +40,8 @@ InGameMenuTransportCompanyFrame.TAB_NAMES = {
     "transportCompany_tabDispatch",
     "transportCompany_tabFleet",
     "transportCompany_tabLedger",
-    "transportCompany_tabSettings"
+    "transportCompany_tabSettings",
+    "transportCompany_tabDrivers"
 }
 
 function InGameMenuTransportCompanyFrame.new(target, custom_mt)
@@ -88,6 +90,34 @@ function InGameMenuTransportCompanyFrame:initialize()
         text = g_i18n:getText("transportCompany_settingReset"),
         callback = function()
             self:onButtonResetSetting()
+        end
+    }
+    self.hireDriverButtonInfo = {
+        inputAction = InputAction.MENU_ACTIVATE,
+        text = g_i18n:getText("transportCompany_driverHire"),
+        callback = function()
+            self:onButtonHireDriver()
+        end
+    }
+    self.assignDriverButtonInfo = {
+        inputAction = InputAction.MENU_EXTRA_1,
+        text = g_i18n:getText("transportCompany_driverAssign"),
+        callback = function()
+            self:onButtonAssignDriver()
+        end
+    }
+    self.fireDriverButtonInfo = {
+        inputAction = InputAction.MENU_EXTRA_2,
+        text = g_i18n:getText("transportCompany_driverFire"),
+        callback = function()
+            self:onButtonFireDriver()
+        end
+    }
+    self.upgradeHqButtonInfo = {
+        inputAction = InputAction.MENU_ACTIVATE,
+        text = g_i18n:getText("transportCompany_hqUpgrade"),
+        callback = function()
+            self:onButtonUpgradeHq()
         end
     }
 
@@ -193,6 +223,8 @@ function InGameMenuTransportCompanyFrame:updateTabContent()
             self:_buildLedgerRows(manager, company)
         elseif self.currentTab == InGameMenuTransportCompanyFrame.TAB_SETTINGS then
             self:_buildSettingsRows(manager, company)
+        elseif self.currentTab == InGameMenuTransportCompanyFrame.TAB_DRIVERS then
+            self:_buildDriverRows(manager, company)
         end
     end
 
@@ -229,6 +261,8 @@ function InGameMenuTransportCompanyFrame:_updateEmptyText(manager, company)
         key = "transportCompany_noHq"
     elseif self.currentTab == InGameMenuTransportCompanyFrame.TAB_FLEET then
         key = "transportCompany_fleetNoTrucks"
+    elseif self.currentTab == InGameMenuTransportCompanyFrame.TAB_DRIVERS then
+        key = "transportCompany_driversEmpty"
     elseif self.currentTab == InGameMenuTransportCompanyFrame.TAB_LEDGER then
         key = "transportCompany_noHistory"
     end
@@ -261,6 +295,15 @@ function InGameMenuTransportCompanyFrame:_updateMenuButtons()
             table.insert(buttons, self.changeButtonInfo)
             table.insert(buttons, self.resetButtonInfo)
         end
+    elseif self.currentTab == InGameMenuTransportCompanyFrame.TAB_DRIVERS then
+        -- The Drivers tab always offers Hire; if a driver is selected,
+        -- also offer Assign and Fire.
+        table.insert(buttons, self.hireDriverButtonInfo)
+        if self:getSelectedDriver() ~= nil then
+            table.insert(buttons, self.assignDriverButtonInfo)
+            table.insert(buttons, self.fireDriverButtonInfo)
+        end
+        table.insert(buttons, self.upgradeHqButtonInfo)
     else
         local contract = self:getSelectedContract()
         if contract ~= nil then
@@ -444,6 +487,101 @@ function InGameMenuTransportCompanyFrame:_buildSettingsRows(manager, company)
     end
 end
 
+---Drivers tab: one row per named driver on the payroll, plus a final
+---row for the HQ upgrade so the player can read its effect.
+function InGameMenuTransportCompanyFrame:_buildDriverRows(manager, company)
+    if company == nil then return end
+
+    for driverId, driver in pairs(company.drivers) do
+        local truckName = ""
+        if driver.assignedTruckUniqueId ~= nil and driver.assignedTruckUniqueId ~= "" then
+            local truck = company.trucks[driver.assignedTruckUniqueId]
+            truckName = truck ~= nil and truck.vehicleName
+                or g_i18n:getText("transportCompany_fleetTruckName")
+        end
+        table.insert(self.rows, {
+            cellName = "row",
+            driver   = driver,
+            primary  = driver.name or driverId,
+            left     = g_i18n:formatMoney(driver:getCurrentWage(), 0, true, true),
+            right    = truckName ~= "" and truckName
+                or string.format("%d jobs", driver.jobsDone),
+        })
+    end
+
+    -- HQ tier row: lets the player see and trigger the upgrade.
+    local cost = company:getNextHqUpgradeCost()
+    table.insert(self.rows, {
+        cellName = "row",
+        hqUpgrade = true,
+        primary  = g_i18n:getText("transportCompany_hqLevel"),
+        left     = g_i18n:getText("transportCompany_hqTier")
+            .. " " .. tostring(company.hqLevel),
+        right    = cost ~= nil and g_i18n:formatMoney(cost, 0, true, true) or "",
+    })
+end
+
+---The driver under the cursor, when the Drivers tab is open.
+function InGameMenuTransportCompanyFrame:getSelectedDriver()
+    if self.contentList == nil then return nil end
+    local row = self.rows[self.contentList.selectedIndex]
+    return row ~= nil and row.driver or nil
+end
+
+function InGameMenuTransportCompanyFrame:onButtonHireDriver()
+    local manager = TransportCompanyManager.getInstance()
+    if manager == nil then return end
+    TransportCompanyDriverEvent.sendEvent(
+        TransportCompanyDriverEvent.ACTION_HIRE,
+        g_currentMission:getFarmId(), nil, nil
+    )
+    self:updateTabContent()
+end
+
+function InGameMenuTransportCompanyFrame:onButtonAssignDriver()
+    local driver = self:getSelectedDriver()
+    if driver == nil then return end
+    local manager = TransportCompanyManager.getInstance()
+    if manager == nil then return end
+    local company = manager:getLocalCompany()
+    if company == nil then return end
+
+    -- Cycle: unassigned -> first truck -> unassigned. Simple one-button
+    -- assignment; assigning picks the first enrolled truck that has no
+    -- driver yet, or clears if all are taken.
+    local target = ""
+    for _, truck in pairs(company.trucks) do
+        if truck.uniqueId ~= driver.assignedTruckUniqueId
+           and company:getDriverForTruck(truck.uniqueId) == nil then
+            target = truck.uniqueId
+            break
+        end
+    end
+    TransportCompanyDriverEvent.sendEvent(
+        TransportCompanyDriverEvent.ACTION_ASSIGN,
+        g_currentMission:getFarmId(), driver.driverId, target
+    )
+    self:updateTabContent()
+end
+
+function InGameMenuTransportCompanyFrame:onButtonFireDriver()
+    local driver = self:getSelectedDriver()
+    if driver == nil then return end
+    TransportCompanyDriverEvent.sendEvent(
+        TransportCompanyDriverEvent.ACTION_FIRE,
+        g_currentMission:getFarmId(), driver.driverId, nil
+    )
+    self:updateTabContent()
+end
+
+function InGameMenuTransportCompanyFrame:onButtonUpgradeHq()
+    TransportCompanyDriverEvent.sendEvent(
+        TransportCompanyDriverEvent.ACTION_UPGRADE,
+        g_currentMission:getFarmId(), nil, nil
+    )
+    self:updateTabContent()
+end
+
 -- ── Detail panel ───────────────────────────────
 
 ---Rebuild the right-hand panel for whatever is selected on the left.
@@ -476,6 +614,10 @@ function InGameMenuTransportCompanyFrame:_rebuildDetail()
         hasDetail = self:_buildSettingDetail(row.setting)
     elseif row ~= nil and row.summary then
         hasDetail = self:_buildCompanyDetail()
+    elseif row ~= nil and row.hqUpgrade then
+        hasDetail = self:_buildHqDetail()
+    elseif row ~= nil and row.driver ~= nil then
+        hasDetail = self:_buildDriverDetail(row.driver)
     elseif row ~= nil and row.contract ~= nil then
         hasDetail = self:_buildContractDetail(row.contract)
     elseif row ~= nil and row.truck ~= nil then
@@ -645,6 +787,21 @@ function InGameMenuTransportCompanyFrame:_buildCompanyDetail()
     self:_addDetail("transportCompany_ledgerActiveJobs", tostring(open))
     self:_addDetail("transportCompany_totalJobs",     tostring(ledger.jobs))
 
+    -- Rolling weekly P&L: the last few periods, newest first.
+    local history = company.ledgerHistory or {}
+    for i = #history, 1, -1 do
+        local p = history[i]
+        local label = string.format("%s %d",
+            g_i18n:getText("transportCompany_period"), p.index)
+        local profit = (p.revenue or 0) - (p.wages or 0)
+        table.insert(self.detailRows, {
+            cellName = "detailItem",
+            label = label,
+            value = string.format("%s / %d jobs",
+                g_i18n:formatMoney(profit, 0, true, true), p.jobs or 0),
+        })
+    end
+
     self:_setProgress(0, "")
     self:_setReward("transportCompany_ledgerProfit", money(profit))
     return true
@@ -773,8 +930,76 @@ function InGameMenuTransportCompanyFrame:_buildTruckDetail(truck)
         g_i18n:formatDistance(truck.distanceM, 1))
     self:_addDetail("transportCompany_fleetJobs", tostring(truck.jobsDelivered))
 
+    -- Maintenance: how far until the next service.
+    if truck.nextServiceKm ~= nil then
+        local remaining = math.max(0, truck.nextServiceKm - (truck.distanceM or 0))
+        self:_addDetail("transportCompany_truckNextService",
+            g_i18n:formatDistance(remaining, 1))
+    end
+
     self:_setProgress(0, "")
     self:_setReward("transportCompany_fleetProfit", money(truck:getProfit()))
+    return true
+end
+
+---Driver detail: who they are, what they cost, and which truck they run.
+function InGameMenuTransportCompanyFrame:_buildDriverDetail(driver)
+    if self.detailTitle ~= nil then
+        self.detailTitle:setText(driver.name or "")
+    end
+    if self.detailSubtitle ~= nil then
+        self.detailSubtitle:setText(g_i18n:getText("transportCompany_driverTitle"))
+    end
+
+    local money = function(v) return g_i18n:formatMoney(v, 0, true, true) end
+    self:_addDetail("transportCompany_driverWage", money(driver:getCurrentWage()))
+    self:_addDetail("transportCompany_driverExperience",
+        string.format("%d / %d", math.floor(driver.experience),
+            TransportCompanyDriver.MAX_EXPERIENCE))
+    self:_addDetail("transportCompany_driverJobs", tostring(driver.jobsDone))
+
+    local truckName = "-"
+    if driver.assignedTruckUniqueId ~= nil and driver.assignedTruckUniqueId ~= "" then
+        local company = self._company
+        if company ~= nil and company.trucks[driver.assignedTruckUniqueId] ~= nil then
+            truckName = company.trucks[driver.assignedTruckUniqueId].vehicleName or truckName
+        end
+    end
+    self:_addDetail("transportCompany_driverAssignedTruck", truckName)
+
+    self:_setProgress(0, "")
+    self:_setReward("transportCompany_driverWage", money(driver:getCurrentWage()))
+    return true
+end
+
+---HQ upgrade detail: what the current tier grants and the next tier
+---would cost.
+function InGameMenuTransportCompanyFrame:_buildHqDetail()
+    local company = self._company
+    if company == nil then return false end
+
+    if self.detailTitle ~= nil then
+        self.detailTitle:setText(g_i18n:getText("transportCompany_hqLevel"))
+    end
+    if self.detailSubtitle ~= nil then
+        self.detailSubtitle:setText(g_i18n:getText("transportCompany_hqTier")
+            .. " " .. tostring(company.hqLevel)
+            .. " / " .. tostring(TransportCompanyCompany.HQ_MAX_LEVEL))
+    end
+
+    self:_addDetail("transportCompany_hqBoardSize", tostring(company:getBoardSize()))
+    self:_addDetail("transportCompany_hqDriverCap", tostring(company:getDriverCap()))
+    self:_addDetail("transportCompany_hqReputation",
+        string.format("%d / %d", math.floor(company.reputation),
+            TransportCompanyCompany.REPUTATION_MAX))
+    self:_addDetail("transportCompany_hqLevel",
+        g_i18n:getText("transportCompany_hqLevelNum") .. " " .. tostring(company:getLevel()))
+
+    local cost = company:getNextHqUpgradeCost()
+    self:_setProgress(0, "")
+    self:_setReward("transportCompany_hqUpgradeCost",
+        cost ~= nil and g_i18n:formatMoney(cost, 0, true, true)
+            or g_i18n:getText("transportCompany_hqMaxLevel"))
     return true
 end
 

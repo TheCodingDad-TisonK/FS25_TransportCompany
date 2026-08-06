@@ -51,6 +51,8 @@ function TransportCompanyBooksEvent:writeStream(streamId, connection)
     streamWriteFloat64(streamId, self.ledgerRevenue or 0)
     streamWriteFloat64(streamId, self.ledgerDriverWages or 0)
     streamWriteInt32(streamId, self.ledgerJobs or 0)
+    streamWriteFloat32(streamId, self.reputation or 0)
+    streamWriteInt8(streamId, self.hqLevel or 1)
 
     local trucks = self.trucks or {}
     streamWriteInt16(streamId, #trucks)
@@ -64,6 +66,24 @@ function TransportCompanyBooksEvent:writeStream(streamId, connection)
         streamWriteFloat64(streamId, t.distanceM or 0)
         streamWriteInt32(streamId, t.jobsDelivered or 0)
     end
+
+    -- Named driver roster (business sim).
+    local drivers = self.drivers or {}
+    streamWriteInt16(streamId, #drivers)
+    for _, d in ipairs(drivers) do
+        d:writeStream(streamId)
+    end
+
+    -- Weekly P&L history.
+    local history = self.ledgerHistory or {}
+    streamWriteInt16(streamId, #history)
+    for _, p in ipairs(history) do
+        streamWriteInt32(streamId, p.index or 0)
+        streamWriteFloat64(streamId, p.revenue or 0)
+        streamWriteFloat64(streamId, p.wages or 0)
+        streamWriteInt32(streamId, p.jobs or 0)
+        streamWriteFloat64(streamId, p.km or 0)
+    end
 end
 
 function TransportCompanyBooksEvent:readStream(streamId, connection)
@@ -71,6 +91,8 @@ function TransportCompanyBooksEvent:readStream(streamId, connection)
     self.ledgerRevenue = streamReadFloat64(streamId)
     self.ledgerDriverWages = streamReadFloat64(streamId)
     self.ledgerJobs = streamReadInt32(streamId)
+    self.reputation = streamReadFloat32(streamId)
+    self.hqLevel = streamReadInt8(streamId)
 
     local n = streamReadInt16(streamId)
     self.trucks = {}
@@ -86,6 +108,26 @@ function TransportCompanyBooksEvent:readStream(streamId, connection)
             jobsDelivered = streamReadInt32(streamId),
         })
     end
+
+    local nd = streamReadInt16(streamId)
+    self.drivers = {}
+    for i = 1, nd do
+        local d = TransportCompanyDriver.readStream(streamId)
+        table.insert(self.drivers, d)
+    end
+
+    local nh = streamReadInt16(streamId)
+    self.ledgerHistory = {}
+    for i = 1, nh do
+        table.insert(self.ledgerHistory, {
+            index = streamReadInt32(streamId),
+            revenue = streamReadFloat64(streamId),
+            wages = streamReadFloat64(streamId),
+            jobs = streamReadInt32(streamId),
+            km = streamReadFloat64(streamId),
+        })
+    end
+
     self:run(connection)
 end
 

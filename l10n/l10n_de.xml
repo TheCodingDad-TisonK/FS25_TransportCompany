@@ -96,5 +96,30 @@
         <e k="transportCompany_hireAvailable" v="Möglich"/>
         <e k="transportCompany_hireUnavailable" v="Nicht möglich"/>
         <e k="transportCompany_hireReason" v="Grund"/>
+        <e k="transportCompany_tabDrivers" v="Fahrer"/>
+        <e k="transportCompany_driversEmpty" v="Noch keine Fahrer auf der Lohnliste. Stelle einen ein und weise ihn einem LKW zu, um Fahrer-Aufträge auszuführen."/>
+        <e k="transportCompany_driverTitle" v="Fahrer"/>
+        <e k="transportCompany_driverHire" v="Fahrer einstellen"/>
+        <e k="transportCompany_driverAssign" v="LKW zuweisen"/>
+        <e k="transportCompany_driverFire" v="Fahrer entlassen"/>
+        <e k="transportCompany_driverWage" v="Wochenlohn"/>
+        <e k="transportCompany_driverExperience" v="Erfahrung"/>
+        <e k="transportCompany_driverJobs" v="Aufträge"/>
+        <e k="transportCompany_driverAssignedTruck" v="Zugewiesener LKW"/>
+        <e k="transportCompany_driverHired" v="%s eingestellt für %s."/>
+        <e k="transportCompany_driverCapReached" v="Das Fahrerlimit ist erreicht. Schließe Aufträge ab, um deinen Ruf zu steigern und das Limit zu erhöhen."/>
+        <e k="transportCompany_hqLevel" v="Zentrale"/>
+        <e k="transportCompany_hqLevelNum" v="Rufstufe"/>
+        <e k="transportCompany_hqTier" v="Stufe"/>
+        <e k="transportCompany_hqUpgrade" v="Zentrale ausbauen"/>
+        <e k="transportCompany_hqUpgraded" v="Zentrale auf Stufe %s ausgebaut für %s. Auftragsbrett vergrößert."/>
+        <e k="transportCompany_hqUpgradeCost" v="Ausbaukosten"/>
+        <e k="transportCompany_hqMaxLevel" v="Die Zentrale ist bereits auf der höchsten Stufe."/>
+        <e k="transportCompany_hqBoardSize" v="Auftragsbrett"/>
+        <e k="transportCompany_hqDriverCap" v="Fahrerlimit"/>
+        <e k="transportCompany_hqReputation" v="Ruf"/>
+        <e k="transportCompany_truckNextService" v="Nächste Wartung in"/>
+        <e k="transportCompany_noMoney" v="Nicht genug Geld."/>
+        <e k="transportCompany_period" v="Woche"/>
     </elements>
 </l10n>

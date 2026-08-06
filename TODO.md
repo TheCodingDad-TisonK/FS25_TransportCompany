@@ -38,20 +38,21 @@ merged to `main` and its in-game verification checklist is green.
 
 ## R4 · v3.0.0 — Business sim layer
 
-- [ ] Named driver roster (`TransportCompanyDriver`): hire/fire at HQ, base
-      wage + per-job share, experience growth, assigned truck.
-- [ ] Reputation/XP: on-time completion +, expired/returned −; gates board
-      size, driver cap, premium routes.
-- [ ] HQ upgrade tiers bought in-PDA (capacity, driver cap, board size,
-      premium unlocks).
-- [ ] Maintenance & depreciation: service cost at km milestones, depreciation
-      on the books.
-- [ ] Ledger depth: per-season/month P&L history, cost-per-km, fleet
-      utilisation, configurable retention.
-- [ ] simtest6+ for driver wages/XP, maintenance thresholds, ledger rollup.
+- [x] Named driver roster (`TransportCompanyDriver`): hire/fire at the HQ,
+      base wage + experience progression, assigned truck.
+- [x] Reputation/level: on-time completion +, expiry −; level gates the
+      driver cap.
+- [x] HQ upgrade tiers bought in-PDA (board size + driver cap per tier).
+- [x] Maintenance: service at km milestones booked as a truck + company
+      expense.
+- [x] Weekly wage payment from the farm balance, once a game week.
+- [x] Weekly P&L rollup in the Ledger detail panel.
+- [x] simtest6: drivers, cap gating, reputation clamps, HQ upgrades,
+      maintenance, wages, P&L rollup, farm-ownership validation.
 
 ## Done
 
 - [x] R1 · v2.0.0 per-farm companies (2026-08-06, development)
 - [x] R2 · v2.1.0 economy & route core (2026-08-06, development)
 - [x] R3 · v2.2.0 self-haul attribution (2026-08-06, development)
+- [x] R4 · v3.0.0 business sim (2026-08-06, development)

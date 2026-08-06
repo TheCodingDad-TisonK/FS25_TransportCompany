@@ -644,7 +644,8 @@ function TransportCompanyManager:_regenerateContractBoard(farmId)
         return
     end
 
-    local maxActive = company.settings:get("maxActiveContracts") or 5
+    -- Board size includes the HQ upgrade bonus.
+    local maxActive = company:getBoardSize()
     local activeCount = 0
 
     for _, contract in pairs(company.contracts) do
@@ -759,16 +760,38 @@ function TransportCompanyManager:_saveCompanyToFile(company, filePath)
         truckIdx = truckIdx + 1
     end
 
+    local driverIdx = 0
+    for _, driver in pairs(company.drivers) do
+        driver:saveToXMLFile(
+            xmlFile, string.format("transportCompany.drivers.driver(%d)", driverIdx)
+        )
+        driverIdx = driverIdx + 1
+    end
+
     xmlFile:setFloat("transportCompany.ledger#revenue", company.ledger.revenue)
     xmlFile:setFloat("transportCompany.ledger#driverWages", company.ledger.driverWages)
     xmlFile:setInt("transportCompany.ledger#jobs", company.ledger.jobs)
+
+    -- Business-sim state (R4)
+    xmlFile:setFloat("transportCompany.reputation#value", company.reputation or 0)
+    xmlFile:setInt("transportCompany.hq#level", company.hqLevel or TransportCompanyCompany.HQ_BASE_LEVEL)
+    local histIdx = 0
+    for _, period in ipairs(company.ledgerHistory or {}) do
+        local key = string.format("transportCompany.history.period(%d)", histIdx)
+        xmlFile:setInt(key .. "#index", period.index or 0)
+        xmlFile:setFloat(key .. "#revenue", period.revenue or 0)
+        xmlFile:setFloat(key .. "#wages", period.wages or 0)
+        xmlFile:setInt(key .. "#jobs", period.jobs or 0)
+        xmlFile:setFloat(key .. "#km", period.km or 0)
+        histIdx = histIdx + 1
+    end
 
     xmlFile:save()
     xmlFile:delete()
 
     TransportCompanyLog.debug(
-        "Saved farm %s: %d contracts, %d trucks",
-        tostring(company.farmId), idx, truckIdx
+        "Saved farm %s: %d contracts, %d trucks, %d drivers",
+        tostring(company.farmId), idx, truckIdx, driverIdx
     )
     return true
 end
@@ -849,15 +872,44 @@ function TransportCompanyManager:_loadCompanyFromFile(company, filePath)
         truckIdx = truckIdx + 1
     end
 
+    local driverIdx = 0
+    while true do
+        local key = string.format("transportCompany.drivers.driver(%d)", driverIdx)
+        local driverId = xmlFile:getString(key .. "#driverId")
+        if driverId == nil or driverId == "" then break end
+
+        local driver = TransportCompanyDriver.loadFromXMLFile(xmlFile, key)
+        company.drivers[driver.driverId] = driver
+        driverIdx = driverIdx + 1
+    end
+
     company.ledger.revenue = xmlFile:getFloat("transportCompany.ledger#revenue", 0)
     company.ledger.driverWages = xmlFile:getFloat("transportCompany.ledger#driverWages", 0)
     company.ledger.jobs = xmlFile:getInt("transportCompany.ledger#jobs", 0)
 
+    -- Business-sim state (R4). Defaults keep pre-R4 saves working.
+    company.reputation = xmlFile:getFloat("transportCompany.reputation#value", 0)
+    company.hqLevel = xmlFile:getInt("transportCompany.hq#level", TransportCompanyCompany.HQ_BASE_LEVEL)
+    local histIdx = 0
+    while true do
+        local key = string.format("transportCompany.history.period(%d)", histIdx)
+        local index = xmlFile:getInt(key .. "#index", -1)
+        if index < 0 then break end
+        table.insert(company.ledgerHistory, {
+            index = index,
+            revenue = xmlFile:getFloat(key .. "#revenue", 0),
+            wages = xmlFile:getFloat(key .. "#wages", 0),
+            jobs = xmlFile:getInt(key .. "#jobs", 0),
+            km = xmlFile:getFloat(key .. "#km", 0),
+        })
+        histIdx = histIdx + 1
+    end
+
     xmlFile:delete()
 
     TransportCompanyLog.info(
-        "Loaded farm %s: %d contracts (%d dropped, %d stale), %d trucks from savegame",
-        tostring(company.farmId), loaded, dropped, stale, truckIdx
+        "Loaded farm %s: %d contracts (%d dropped, %d stale), %d trucks, %d drivers from savegame",
+        tostring(company.farmId), loaded, dropped, stale, truckIdx, driverIdx
     )
 end
 
@@ -975,6 +1027,7 @@ function TransportCompanyManager:update(dt)
     if self.tickTimer >= 1000 then
         self.tickTimer = 0
         self:_sampleTrucks(dt)
+        self:_checkMaintenance()
     end
 
     -- Check deadlines every 5 seconds
@@ -1012,8 +1065,90 @@ function TransportCompanyManager:update(dt)
                 company.booksSyncTimer = 0
                 self:_broadcastBooks(farmId)
             end
+
+            -- Pay the drivers' weekly base wages once a game week.
+            company.wageTimer = (company.wageTimer or 0) + dt
+            if company.wageTimer >= TransportCompanyContract.DAY_LENGTH * 7 then
+                company.wageTimer = 0
+                self:_payWeeklyWages(company)
+            end
         end
     end
+end
+
+---Check maintenance on every enrolled truck across all companies and
+---book a service when one is due. Runs once a second (the odometer is
+---already accumulated every frame).
+function TransportCompanyManager:_checkMaintenance()
+    for _, company in pairs(self.companies) do
+        if company ~= nil and company:getIsActive() then
+            for _, truck in pairs(company.trucks) do
+                local cost = truck:checkService()
+                if cost > 0 then
+                    -- Service costs come out of the farm balance and are
+                    -- booked as an expense on both the company and the
+                    -- truck, so the Fleet tab shows a truck's real cost.
+                    self:_addMoney(-cost, company.farmId, MoneyType.AI)
+                    company.ledger.driverWages = company.ledger.driverWages + cost
+                    TransportCompanyLog.info(
+                        "Service for %s (farm %s): cost=%d",
+                        truck.vehicleName or truck.uniqueId or "?", tostring(company.farmId), cost
+                    )
+                    TransportCompanyMoneyEvent.sendEvent(
+                        TransportCompanyMoneyEvent.TYPE_EXPENSE,
+                        cost, company.farmId, "", truck.uniqueId
+                    )
+                end
+            end
+        end
+    end
+end
+
+---Pay each company's drivers their weekly base wage, out of the farm
+---balance. The per-job reward split a hired driver keeps is handled at
+---completion; this is the standing payroll for keeping them employed.
+function TransportCompanyManager:_payWeeklyWages(company)
+    if company == nil or company.farmId <= 0 then return end
+    local total = company:getTotalWeeklyWage()
+    if total <= 0 then return end
+
+    self:_addMoney(-total, company.farmId, MoneyType.AI)
+    company.ledger.driverWages = company.ledger.driverWages + total
+    self:_rollLedgerPeriod(company, 0, total, 0, 0)
+
+    TransportCompanyLog.info(
+        "Weekly wages paid for farm %s: %d", tostring(company.farmId), total
+    )
+    TransportCompanyMoneyEvent.sendEvent(
+        TransportCompanyMoneyEvent.TYPE_EXPENSE,
+        total, company.farmId, "", ""
+    )
+end
+
+---Roll the live ledger totals into the current 7-day period bucket so
+---the Ledger tab can show how the company is doing per week.
+---@param company TransportCompanyCompany
+---@param revenue number
+---@param wages number
+---@param jobs number
+---@param km number
+function TransportCompanyManager:_rollLedgerPeriod(company, revenue, wages, jobs, km)
+    local periodIndex = math.floor(g_currentMission.time / (TransportCompanyContract.DAY_LENGTH * 7))
+    local history = company.ledgerHistory or {}
+    local last = history[#history]
+    if last == nil or last.index ~= periodIndex then
+        last = { index = periodIndex, revenue = 0, wages = 0, jobs = 0, km = 0 }
+        table.insert(history, last)
+        -- Keep only the last ~16 weeks so the savegame XML stays lean.
+        if #history > 16 then
+            table.remove(history, 1)
+        end
+    end
+    last.revenue = last.revenue + (revenue or 0)
+    last.wages = last.wages + (wages or 0)
+    last.jobs = last.jobs + (jobs or 0)
+    last.km = last.km + (km or 0)
+    company.ledgerHistory = history
 end
 
 ---Accumulate per-tick distance for every enrolled truck across all
@@ -1070,6 +1205,9 @@ function TransportCompanyManager:_checkDeadlines()
                 if contract:getIsExpired(now) then
                     if contract.state == TransportCompanyContract.STATE_ACCEPTED then
                         contract:expire()
+                        -- A failed job costs reputation: clients who miss
+                        -- deadlines are less trusted with the next load.
+                        company:addReputation(TransportCompanyCompany.REPUTATION_ON_EXPIRE)
                         TransportCompanyContractEvent.sendEvent(
                             TransportCompanyContractEvent.TYPE_STATE_CHANGE, contract,
                             TransportCompanyContract.STATE_EXPIRED, farmId
@@ -1097,6 +1235,118 @@ function TransportCompanyManager:_checkDeadlines()
 end
 
 -- ── Accepting a contract ───────────────────────
+
+---Server-side handler for a driver/hq request. Reached from the PDA
+---(directly on a listen server, via TransportCompanyDriverEvent from a
+---client). All roster and HQ state is authoritative here; clients get
+---the result through the next TransportCompanyBooksEvent snapshot.
+---@param action number TransportCompanyDriverEvent.ACTION_*
+---@param farmId number
+---@param driverId string|nil
+---@param truckUniqueId string|nil
+---@return boolean applied
+function TransportCompanyManager:onDriverRequest(action, farmId, driverId, truckUniqueId)
+    if not self.isServer then return false end
+
+    local company = self:getCompany(farmId)
+    if company == nil or company.isArchived then return false end
+    if farmId == nil or farmId <= 0 then return false end
+
+    local applied = false
+    if action == TransportCompanyDriverEvent.ACTION_HIRE then
+        applied = self:_hireDriver(company, farmId)
+    elseif action == TransportCompanyDriverEvent.ACTION_FIRE then
+        applied = self:_fireDriver(company, driverId)
+    elseif action == TransportCompanyDriverEvent.ACTION_ASSIGN then
+        applied = self:_assignDriver(company, driverId, truckUniqueId)
+    elseif action == TransportCompanyDriverEvent.ACTION_UPGRADE then
+        applied = self:_upgradeHq(company, farmId)
+    end
+
+    if applied then
+        -- Refresh everyone's roster/books in one authoritative snapshot.
+        self:_broadcastBooks(farmId)
+    end
+    return applied
+end
+
+---Hire a named driver onto the payroll, if under the cap and able to
+---pay the hiring cost.
+---@return boolean
+function TransportCompanyManager:_hireDriver(company, farmId)
+    if company:getDriverCount() >= company:getDriverCap() then
+        self:_notify(g_i18n:getText("transportCompany_driverCapReached"), farmId)
+        return false
+    end
+
+    local cost = TransportCompanyDriver.HIRE_COST
+    if g_currentMission ~= nil and g_currentMission:getFarmMoney(farmId) < cost then
+        self:_notify(g_i18n:getText("transportCompany_noMoney"), farmId)
+        return false
+    end
+
+    local driver = TransportCompanyDriver.new(
+        TransportCompanyDriver.randomName(), TransportCompanyDriver.BASE_WEEKLY_WAGE)
+    driver.driverId = string.format("drv_%d_%d",
+        g_currentMission.time, math.random(10000, 99999))
+    company.drivers[driver.driverId] = driver
+
+    self:_addMoney(-cost, farmId, MoneyType.AI)
+    company.ledger.driverWages = company.ledger.driverWages + cost
+    self:_rollLedgerPeriod(company, 0, cost, 0, 0)
+
+    self:_notify(string.format(
+        g_i18n:getText("transportCompany_driverHired"),
+        driver.name, g_i18n:formatMoney(cost, 0, true, true)
+    ), farmId)
+    return true
+end
+
+---Remove a driver from the payroll. No severance; the wage simply
+---stops next week.
+---@return boolean
+function TransportCompanyManager:_fireDriver(company, driverId)
+    local driver = company.drivers[driverId]
+    if driver == nil then return false end
+    company.drivers[driverId] = nil
+    return true
+end
+
+---Assign (or clear) a driver's truck. Clearing releases the driver.
+---@return boolean
+function TransportCompanyManager:_assignDriver(company, driverId, truckUniqueId)
+    local driver = company.drivers[driverId]
+    if driver == nil then return false end
+    driver.assignedTruckUniqueId = truckUniqueId or ""
+    return true
+end
+
+---Raise the HQ one tier, charging the farm the upgrade cost.
+---@return boolean
+function TransportCompanyManager:_upgradeHq(company, farmId)
+    local cost = company:getNextHqUpgradeCost()
+    if cost == nil then
+        self:_notify(g_i18n:getText("transportCompany_hqMaxLevel"), farmId)
+        return false
+    end
+    if g_currentMission ~= nil and g_currentMission:getFarmMoney(farmId) < cost then
+        self:_notify(g_i18n:getText("transportCompany_noMoney"), farmId)
+        return false
+    end
+
+    company:hqUpgrade()
+    self:_addMoney(-cost, farmId, MoneyType.AI)
+
+    self:_notify(string.format(
+        g_i18n:getText("transportCompany_hqUpgraded"),
+        tostring(company.hqLevel),
+        g_i18n:formatMoney(cost, 0, true, true)
+    ), farmId)
+
+    -- A bigger office means a bigger board.
+    self:_regenerateContractBoard(farmId)
+    return true
+end
 
 ---Server-side handler for an accept request. Reached from the PDA
 ---button (directly on a listen server, via TransportCompanyAcceptEvent
@@ -1254,6 +1504,7 @@ function TransportCompanyManager:_findTruckForContract(company, contract, farmId
     end
 
     local considered = 0
+    local fallback = nil
     for _, truck in pairs(company.trucks) do
         if truck.farmId == farmId then
             considered = considered + 1
@@ -1263,10 +1514,23 @@ function TransportCompanyManager:_findTruckForContract(company, contract, farmId
             -- use, and has both loading and discharge nodes.
             if vehicle ~= nil and not vehicle:getIsBeingDeleted()
                and probe:getIsAvailableForVehicle(vehicle) then
-                return truck
+                -- Prefer a truck that has a named driver assigned: that
+                -- is the truck the player staffed, so the driver's record
+                -- moves with the job. First usable truck is the fallback
+                -- so hiring never fails just because nobody is assigned.
+                if fallback == nil then
+                    fallback = truck
+                end
+                if company:getDriverForTruck(truck.uniqueId) ~= nil then
+                    return truck
+                end
             end
             self:_logHireRejection(truck, vehicle)
         end
+    end
+
+    if fallback ~= nil then
+        return fallback
     end
 
     TransportCompanyLog.info(
@@ -1726,6 +1990,20 @@ function TransportCompanyManager:_completeContract(company, contract)
     company.ledger.driverWages = company.ledger.driverWages + driverCut
     company.ledger.jobs = company.ledger.jobs + 1
 
+    -- P&L rollup for the Ledger tab's weekly history.
+    self:_rollLedgerPeriod(company, companyRevenue, driverCut, 1,
+        truck ~= nil and truck.distanceM or 0)
+
+    -- Reputation: an on-time delivery builds the company. Urgent jobs
+    -- earn a touch more; bulk a touch less, matching the reward curve.
+    local reputationGain = TransportCompanyCompany.REPUTATION_ON_COMPLETE
+    if contract.tier == TransportCompanyContract.CONTRACT_TIER_URGENT then
+        reputationGain = 3
+    elseif contract.tier == TransportCompanyContract.CONTRACT_TIER_BULK then
+        reputationGain = 1
+    end
+    company:addReputation(reputationGain)
+
     if truck ~= nil then
         truck:addRevenue(companyRevenue)
         truck:addJob()
@@ -1739,6 +2017,15 @@ function TransportCompanyManager:_completeContract(company, contract)
                 TransportCompanyMoneyEvent.TYPE_HIRED_DRIVER_CUT,
                 driverCut, farmId, contract.contractId, truck.uniqueId
             )
+        end
+
+        -- A named driver assigned to this truck rides the job: their
+        -- record gains experience and a job count on top of the money.
+        if contract.isHiredDriver then
+            local driver = company:getDriverForTruck(truck.uniqueId)
+            if driver ~= nil then
+                driver:addJob(reputationGain)
+            end
         end
     end
 
@@ -1895,6 +2182,8 @@ function TransportCompanyManager:_broadcastBooks(farmId)
     event.ledgerRevenue = company.ledger.revenue
     event.ledgerDriverWages = company.ledger.driverWages
     event.ledgerJobs = company.ledger.jobs
+    event.reputation = company.reputation or 0
+    event.hqLevel = company.hqLevel or TransportCompanyCompany.HQ_BASE_LEVEL
     event.trucks = {}
     for uniqueId, truck in pairs(company.trucks) do
         table.insert(event.trucks, {
@@ -1908,6 +2197,11 @@ function TransportCompanyManager:_broadcastBooks(farmId)
             jobsDelivered = truck.jobsDelivered or 0,
         })
     end
+    event.drivers = {}
+    for _, driver in pairs(company.drivers) do
+        table.insert(event.drivers, driver)
+    end
+    event.ledgerHistory = company.ledgerHistory or {}
     TransportCompanyBooksEvent.sendEvent(event)
 end
 
@@ -1927,6 +2221,8 @@ function TransportCompanyManager:onBooksEvent(event, farmId)
     company.ledger.revenue = event.ledgerRevenue or 0
     company.ledger.driverWages = event.ledgerDriverWages or 0
     company.ledger.jobs = event.ledgerJobs or 0
+    company.reputation = event.reputation or 0
+    company.hqLevel = event.hqLevel or TransportCompanyCompany.HQ_BASE_LEVEL
 
     for _, t in ipairs(event.trucks or {}) do
         if t.uniqueId ~= nil and t.uniqueId ~= "" then
@@ -1946,6 +2242,16 @@ function TransportCompanyManager:onBooksEvent(event, farmId)
             truck.jobsDelivered = t.jobsDelivered or 0
         end
     end
+
+    -- Named drivers arrive as records; rebuild the roster keyed by id.
+    company.drivers = {}
+    for _, d in ipairs(event.drivers or {}) do
+        if d.driverId ~= nil and d.driverId ~= "" then
+            company.drivers[d.driverId] = d
+        end
+    end
+
+    company.ledgerHistory = event.ledgerHistory or {}
 
     self:_refreshDispatchUI()
 end
@@ -2086,6 +2392,20 @@ function TransportCompanyManager:_registerConsoleCommands()
         "tc_reset_settings",
         "Reset Transport Company settings to defaults",
         "consoleCommandResetSettings",
+        self
+    )
+
+    addConsoleCommand(
+        "tc_drivers",
+        "List drivers on the payroll and their assigned trucks",
+        "consoleCommandListDrivers",
+        self
+    )
+
+    addConsoleCommand(
+        "tc_hire_driver",
+        "Hire a named driver (debug)",
+        "consoleCommandHireDriver",
         self
     )
 end
@@ -2299,6 +2619,36 @@ function TransportCompanyManager:consoleCommandResetSettings()
         company.settings:save()
     end
     print("TransportCompany: settings reset to defaults")
+end
+
+function TransportCompanyManager:consoleCommandListDrivers()
+    local company = self:getLocalCompany()
+    if company == nil then
+        print("TransportCompany: no company for your farm (place an HQ first)")
+        return
+    end
+    print(string.format("TransportCompany: %d/%d drivers, reputation %d, HQ tier %d",
+        company:getDriverCount(), company:getDriverCap(),
+        math.floor(company.reputation), company.hqLevel))
+    for id, driver in pairs(company.drivers) do
+        print(string.format("  %s (%s): wage=%d exp=%d jobs=%d truck=%s",
+            id, driver.name or "?", driver:getCurrentWage(),
+            math.floor(driver.experience), driver.jobsDone,
+            driver.assignedTruckUniqueId ~= "" and driver.assignedTruckUniqueId or "-"))
+    end
+end
+
+function TransportCompanyManager:consoleCommandHireDriver()
+    if not self.isServer then
+        print("TransportCompany: only the server can hire drivers")
+        return
+    end
+    local farmId = self:_getCompanyFarmId()
+    if self:onDriverRequest(TransportCompanyDriverEvent.ACTION_HIRE, farmId, nil, nil) then
+        print("TransportCompany: driver hired")
+    else
+        print("TransportCompany: could not hire a driver (cap or funds)")
+    end
 end
 
 -- ── Hints Registration ──────────────────────────

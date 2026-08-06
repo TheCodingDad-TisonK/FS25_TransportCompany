@@ -12,7 +12,14 @@ treated as done and stable.
 | **R1 · v2.0.0** | Per-farm companies | Company class, manager→registrar, per-farm events/persistence/settings, log hygiene, generator tests, legacy save migration | ✅ Shipped (development) |
 | **R2 · v2.1.0** | Economy & route core | Distance-based reward, pallet economy link, capacity-aware sizing, route reasonableness, AI-route preference, difficulty tiers, PDA route economics | ✅ Shipped (development) |
 | **R3 · v2.2.0** | Self-haul attribution | Discharging-vehicle detection credits the tipping truck for self-hauled jobs; additive, never load-bearing | ✅ Shipped (development) |
-| **R4 · v3.0.0** | Business sim | Named driver roster, reputation/XP, HQ upgrade tiers, maintenance & depreciation, ledger P&L depth | ⬜ Next |
+| **R4 · v3.0.0** | Business sim | Named driver roster, weekly wages & experience, reputation/level, HQ upgrade tiers, maintenance, weekly P&L | ✅ Shipped (development) |
+
+## Post-R4 ideas (not yet scheduled)
+
+- Custom HQ model (needs art; the base `easyShed01` stays).
+- Map navigation to a contract's pickup/drop-off.
+- Per-truck efficiency ratings feeding a smarter `EST_FUEL_L_PER_KM`.
+- Premium "long-term" contracts (supply X per week).
 
 ## Principles
 
@@ -36,3 +43,5 @@ treated as done and stable.
 - New map content or stations (contracts must keep working with zero map
   preparation).
 - Cross-mod APIs with the Realistic Farming ecosystem.
+- Map navigation to a contract's pickup/drop-off; per-truck efficiency
+  ratings feeding a smarter fuel estimate; premium long-term contracts.

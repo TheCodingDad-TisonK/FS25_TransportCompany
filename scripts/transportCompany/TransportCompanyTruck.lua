@@ -28,9 +28,14 @@
 
 local modName = g_currentModName
 
----@class TransportCompanyTruck
 TransportCompanyTruck = {}
 local TransportCompanyTruck_mt = Class(TransportCompanyTruck)
+
+-- Service interval in meters (5000 km) and the base cost of a service,
+-- scaled by how worn the truck is.
+TransportCompanyTruck.SERVICE_INTERVAL_KM = 5000
+TransportCompanyTruck.SERVICE_BASE_COST = 4000
+TransportCompanyTruck.SERVICE_COST_PER_KM = 0.4
 
 function TransportCompanyTruck.new(vehicle)
     local self = setmetatable({}, TransportCompanyTruck_mt)
@@ -45,6 +50,11 @@ function TransportCompanyTruck.new(vehicle)
     self.distanceM = 0                             -- meters driven while enrolled
     self.jobsDelivered = 0                         -- contracts completed with this truck
     self.isEnrolled = false
+    -- Maintenance: the truck needs a service every SERVICE_INTERVAL_KM
+    -- of odometer distance; the next service milestone and the number
+    -- of services already done persist with the books.
+    self.nextServiceKm = TransportCompanyTruck.SERVICE_INTERVAL_KM
+    self.servicesDone = 0
     -- Per-tick sampling state (server only)
     self.sampleFillLevels = {}
     self.lastSampledDistance = 0
@@ -63,6 +73,8 @@ function TransportCompanyTruck:saveToXMLFile(xmlFile, key)
     xmlFile:setFloat(key .. "#distanceM", self.distanceM)
     xmlFile:setInt(key .. "#jobsDelivered", self.jobsDelivered)
     xmlFile:setBool(key .. "#isEnrolled", self.isEnrolled)
+    xmlFile:setFloat(key .. "#nextServiceKm", self.nextServiceKm or TransportCompanyTruck.SERVICE_INTERVAL_KM)
+    xmlFile:setInt(key .. "#servicesDone", self.servicesDone or 0)
 end
 
 function TransportCompanyTruck.loadFromXMLFile(xmlFile, key)
@@ -76,6 +88,8 @@ function TransportCompanyTruck.loadFromXMLFile(xmlFile, key)
     self.distanceM = xmlFile:getFloat(key .. "#distanceM", 0)
     self.jobsDelivered = xmlFile:getInt(key .. "#jobsDelivered", 0)
     self.isEnrolled = xmlFile:getBool(key .. "#isEnrolled", true)
+    self.nextServiceKm = xmlFile:getFloat(key .. "#nextServiceKm", TransportCompanyTruck.SERVICE_INTERVAL_KM)
+    self.servicesDone = xmlFile:getInt(key .. "#servicesDone", 0)
     self.sampleFillLevels = {}
     self.lastSampledDistance = 0
     return self
@@ -209,6 +223,27 @@ function TransportCompanyTruck.getIsTruck(vehicle)
         return false
     end
     return vehicle.spec_motorized.statsType == "truck"
+end
+
+---Maintenance: a service is due when the odometer has passed the next
+---service milestone. The cost scales with how many services have been
+---done (an older truck costs more). Returns the service cost when one
+---is due and advances the milestone.
+---@return number cost, 0 when no service is due
+function TransportCompanyTruck:checkService()
+    if self.nextServiceKm == nil then
+        self.nextServiceKm = TransportCompanyTruck.SERVICE_INTERVAL_KM
+    end
+    if self.distanceM < self.nextServiceKm then
+        return 0
+    end
+
+    local cost = TransportCompanyTruck.SERVICE_BASE_COST
+        + self.servicesDone * TransportCompanyTruck.SERVICE_COST_PER_KM * TransportCompanyTruck.SERVICE_INTERVAL_KM
+    self.servicesDone = self.servicesDone + 1
+    self.nextServiceKm = self.nextServiceKm + TransportCompanyTruck.SERVICE_INTERVAL_KM
+    self.otherCost = (self.otherCost or 0) + cost
+    return cost
 end
 
 --- Try to find the live vehicle; returns (vehicle, shouldUnenroll).
