@@ -647,6 +647,13 @@ function InGameMenuTransportCompanyFrame:_rebuildDetail()
     if self.detailList ~= nil then
         self.detailList:reloadData()
     end
+
+    -- The scroll hint tells the player the detail rows continue below.
+    -- Only show it when the list actually overflows, so a short detail
+    -- panel does not advertise scrolling that is not there.
+    if self.scrollHint ~= nil then
+        self.scrollHint:setVisible(hasDetail and #self.detailRows > 6)
+    end
 end
 
 ---Append one label/value line to the detail panel.

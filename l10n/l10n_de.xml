@@ -124,6 +124,7 @@
         <e k="transportCompany_noMoney" v="Nicht genug Geld."/>
         <e k="transportCompany_period" v="Woche"/>
         <e k="transportCompany_help" v="Hilfe"/>
+        <e k="transportCompany_scrollHint" v="Weiter scrollen"/>
         <e k="transportCompany_helpPageStartTitle" v="Willkommen bei Transport Company"/>
         <e k="transportCompany_helpPageStartBody" v="Diese Disposition betreibt ein Transportunternehmen mit den Lade- und Abladestellen deiner Karte.\n\nERSTE SCHRITTE\n1. Kaufe die Transportunternehmen-Zentrale beim Haendler unter Gebaeude &gt; Hallen und stelle sie auf deinem Hof auf.\n2. Das Auftragsbrett fuellt sich, sobald sie steht.\n3. Kaufe einen LKW: Nur Fahrzeuge, die das Spiel als LKW einstuft, erscheinen im Fuhrpark.\n4. Waehle einen Auftrag unter Disposition, nimm ihn an und fahre selbst oder stelle einen Fahrer ein.\n\nAuf den naechsten Seiten findest du einen Leitfaden zu jedem Bereich."/>
         <e k="transportCompany_helpPageBoardTitle" v="Das Auftragsbrett"/>

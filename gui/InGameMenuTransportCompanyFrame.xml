@@ -59,12 +59,21 @@
 		<GuiElement profile="fs25_tcDetailBox" id="detailBox">
 			<Text profile="fs25_tcDetailTitle" id="detailTitle"/>
 			<Text profile="fs25_tcDetailSubtitle" id="detailSubtitle"/>
-			<SmoothList profile="fs25_tcDetailList" id="detailList">
-				<ListItem profile="fs25_tcDetailItem" name="detailItem">
-					<Text profile="fs25_tcDetailLabel" name="label"/>
-					<Text profile="fs25_tcDetailValue" name="value"/>
-				</ListItem>
-			</SmoothList>
+			<GuiElement profile="fs25_tcDetailListWrap" id="detailListWrap">
+				<SmoothList profile="fs25_tcDetailList" id="detailList">
+					<ListItem profile="fs25_tcDetailItem" name="detailItem">
+						<Text profile="fs25_tcDetailLabel" name="label"/>
+						<Text profile="fs25_tcDetailValue" name="value"/>
+					</ListItem>
+				</SmoothList>
+				<!-- A visible slider so players know the detail rows scroll
+				     instead of reading a clipped list as the end. The same
+				     fs25_listSlider profile the left list uses. -->
+				<ThreePartBitmap profile="fs25_listSliderBox" position="12px 0px">
+					<Slider profile="fs25_listSlider" dataElementId="detailList"/>
+				</ThreePartBitmap>
+			</GuiElement>
+			<Text profile="fs25_tcScrollHint" id="scrollHint" text="$l10n_transportCompany_scrollHint"/>
 			<Text profile="fs25_tcProgressLabel" id="progressLabel"/>
 			<ThreePartBitmap profile="fs25_tcProgressBg" id="progressBarBg">
 				<ThreePartBitmap profile="fs25_tcProgressBar" id="progressBar"/>
@@ -134,11 +143,23 @@
 			<textWrapWidth value="840px"/>
 			<textMaxNumLines value="2"/>
 		</Profile>
+		<Profile name="fs25_tcDetailListWrap" extends="emptyPanel" with="anchorTopCenter">
+			<size value="100% 260px"/>
+			<absoluteSizeOffset value="40px 0px"/>
+			<position value="0px -148px"/>
+		</Profile>
 		<Profile name="fs25_tcDetailList" extends="emptyPanel" with="anchorTopCenter">
 			<size value="100% 260px"/>
 			<absoluteSizeOffset value="40px 0px"/>
 			<position value="0px -148px"/>
 			<handleFocus value="false"/>
+		</Profile>
+		<Profile name="fs25_tcScrollHint" extends="fs25_textGrey" with="anchorTopCenter">
+			<size value="800px 22px"/>
+			<position value="0px -414px"/>
+			<textSize value="17px"/>
+			<textAlignment value="center"/>
+			<textColor value="0.55 0.55 0.55 1"/>
 		</Profile>
 		<Profile name="fs25_tcDetailItem" extends="baseReference" with="anchorTopStretchingX alternating">
 			<height value="40px"/>
