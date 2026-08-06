@@ -1,8 +1,15 @@
 v1.2.2.0
 
 - When a hired driver finishes a contract, the truck now drives itself back
-  to park in front of your Transport Company HQ instead of being left at the
+  to park near your Transport Company HQ instead of being left at the
   delivery point
+- New setting, Return truck to HQ (on by default): turn it off to leave
+  finished trucks where they ended
+- A Help button on every tab of the dispatch office opens a paged guide
+  covering how the company works, with a troubleshooting page explaining
+  what to do when a hired driver gets stuck (press H, reposition, re-hire)
+- Long setting descriptions no longer get cut off, and the help dialog's
+  line breaks render properly
 
 v1.2.1.0
 
