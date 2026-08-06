@@ -1,4 +1,4 @@
-v4.0.0.0
+v1.2.0.0
 
 - Complete overhaul. Freight dispatch is now a real business.
 - Per-farm companies: in multiplayer, every farm that owns an HQ runs its

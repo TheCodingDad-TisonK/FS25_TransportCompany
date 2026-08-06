@@ -1,10 +1,10 @@
 # Transport Company — TODO
 
-Operational task list. The v4.0.0.0 overhaul is built and shipped on
+Operational task list. The v1.2.0.0 overhaul is built and shipped on
 `development`; it is considered done when its PR merges to `main` and its
 in-game verification checklist is green.
 
-## v4.0.0.0 — Complete overhaul (all phases built, shipped on development)
+## v1.2.0.0 — Complete overhaul (all phases built, shipped on development)
 
 Built in four internal phases that folded into one release.
 
@@ -26,7 +26,7 @@ Built in four internal phases that folded into one release.
       station type needs a real play session; a miss costs a Fleet line, never
       a job.
 
-## Post-4.0 ideas (not scheduled)
+## Post-1.2 ideas (not scheduled)
 
 - Custom HQ model, map navigation to a contract's pickup/drop-off,
   per-truck efficiency ratings, premium long-term contracts.

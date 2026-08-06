@@ -5,7 +5,7 @@ overhaul of the current gameplay core; the engineering plumbing (MP events,
 delivery hooks, stuck-driver watchdog, settings schema, test harness) is
 treated as done and stable.
 
-## v4.0.0.0 — Complete overhaul (shipped)
+## v1.2.0.0 — Complete overhaul (shipped)
 
 The overhaul shipped as one release, built in four internal phases (per-farm
 companies, economy & route core, self-haul attribution, business sim) that
@@ -18,7 +18,7 @@ folded into a single version.
 | R3 | Self-haul attribution | Discharging-vehicle detection credits the tipping truck for self-hauled jobs; additive, never load-bearing |
 | R4 | Business sim | Named driver roster, weekly wages & experience, reputation/level, HQ upgrade tiers, maintenance, weekly P&L |
 
-## Post-4.0 ideas (not yet scheduled)
+## Post-1.2 ideas (not yet scheduled)
 
 - Custom HQ model (needs art; the base `easyShed01` stays).
 - Map navigation to a contract's pickup/drop-off.

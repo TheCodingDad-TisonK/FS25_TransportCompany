@@ -34,7 +34,7 @@ Then run the **GIANTS TestRunner** on the same zip. It is the authority;
 |---|---|
 | **Mod name** | Transport Company |
 | **Zip filename** | `FS25_TransportCompany.zip` |
-| **Version** | 4.0.0.0 |
+| **Version** | 1.2.0.0 |
 | **Author** | TisonK |
 | **Platform** | PC / Mac |
 | **Category** | Gameplay / Placeables |
@@ -164,7 +164,7 @@ erfasst. Viele Fahrzeuge gelten als Traktor und erscheinen nicht.
 ## 4. Changelog
 
 ```
-v4.0.0.0
+v1.2.0.0
 - Complete overhaul. Freight dispatch is now a real business.
 - Per-farm companies: in multiplayer, every farm that owns an HQ runs its
   own dispatch board, its own fleet and its own ledger, each with its own
