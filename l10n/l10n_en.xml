@@ -124,6 +124,9 @@
         <e k="transportCompany_noMoney" v="Not enough money."/>
         <e k="transportCompany_period" v="Week"/>
         <e k="transportCompany_help" v="Help"/>
+        <e k="transportCompany_resetBoard" v="Reset Board"/>
+        <e k="transportCompany_resetBoardConfirm" v="Clear the dispatch board and generate a fresh set of contracts?\n\nEvery open job is dropped, including ones you have accepted and any a hired driver is part way through. Completed jobs stay in the ledger."/>
+        <e k="transportCompany_resetBoardDone" v="Dispatch board rebuilt: %d job(s) cleared, %d now on the board."/>
         <e k="transportCompany_scrollHint" v="Scroll for more"/>
         <e k="transportCompany_helpPageStartTitle" v="Welcome to Transport Company"/>
         <e k="transportCompany_helpPageStartBody" v="This dispatch office runs a trucking company from your map's own loading and unloading stations.\n\nGET STARTED\n1. Buy the Transport Company HQ from the shop under Buildings &gt; Sheds and place it on your farm.\n2. The contract board fills the moment it is standing.\n3. Buy a truck: only vehicles the game classes as trucks enrol in the Fleet tab.\n4. Pick a job on the Dispatch tab, accept it, and haul the load yourself or hire a driver.\n\nA guide to each section is on the next pages."/>

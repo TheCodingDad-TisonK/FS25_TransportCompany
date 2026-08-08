@@ -83,6 +83,7 @@ Es ist keinerlei Vorbereitung der Karte noetig.
         <sourceFile filename="scripts/transportCompany/events/TransportCompanyBooksEvent.lua"/>
         <sourceFile filename="scripts/transportCompany/events/TransportCompanyAcceptEvent.lua"/>
         <sourceFile filename="scripts/transportCompany/events/TransportCompanyDriverEvent.lua"/>
+        <sourceFile filename="scripts/transportCompany/events/TransportCompanyResetBoardEvent.lua"/>
         <sourceFile filename="scripts/transportCompany/TransportCompanyManager.lua"/>
         <sourceFile filename="scripts/gui/InGameMenuTransportCompanyFrame.lua"/>
         <sourceFile filename="scripts/gui/TransportCompanyHelpDialog.lua"/>

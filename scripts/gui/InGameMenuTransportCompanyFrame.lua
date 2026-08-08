@@ -127,6 +127,16 @@ function InGameMenuTransportCompanyFrame:initialize()
             self:onButtonHelp()
         end
     }
+    -- MENU_CANCEL is the only footer action TabbedMenu supports that the
+    -- Dispatch tab does not already spend (TabbedMenu.lua:6-11 lists all
+    -- six); it sits on backspace, well away from Accept and Hire.
+    self.resetBoardButtonInfo = {
+        inputAction = InputAction.MENU_CANCEL,
+        text = g_i18n:getText("transportCompany_resetBoard"),
+        callback = function()
+            self:onButtonResetBoard()
+        end
+    }
 
     -- Sub-category selector (Dispatch / Fleet / Ledger tabs)
     self.subCategorySelector = self:getDescendantById("subCategorySelector")
@@ -329,6 +339,14 @@ function InGameMenuTransportCompanyFrame:_updateMenuButtons()
                 -- A job you took can still be handed to a driver.
                 table.insert(buttons, self.hireButtonInfo)
             end
+        end
+
+        -- Rebuilding the board only means anything on the board itself,
+        -- and only for a farm that actually has a company to rebuild.
+        -- Saves the player dropping to the console for tc_reset_board.
+        if self.currentTab == InGameMenuTransportCompanyFrame.TAB_DISPATCH
+           and self._company ~= nil and self._company:getIsActive() then
+            table.insert(buttons, self.resetBoardButtonInfo)
         end
     end
 
@@ -590,6 +608,32 @@ function InGameMenuTransportCompanyFrame:onButtonUpgradeHq()
         TransportCompanyDriverEvent.ACTION_UPGRADE,
         g_currentMission:getFarmId(), nil, nil
     )
+    self:updateTabContent()
+end
+
+---Clear the dispatch board and generate a fresh one.
+---
+---Confirmed first: this also drops jobs already accepted, including
+---anything a hired driver is part way through, and a footer button is
+---far easier to hit by accident than a typed console command.
+function InGameMenuTransportCompanyFrame:onButtonResetBoard()
+    YesNoDialog.show(
+        self.onResetBoardConfirmed, self,
+        g_i18n:getText("transportCompany_resetBoardConfirm"),
+        g_i18n:getText("transportCompany_resetBoard")
+    )
+end
+
+function InGameMenuTransportCompanyFrame:onResetBoardConfirmed(yes)
+    if not yes then return end
+
+    TransportCompanyResetBoardEvent.sendEvent(g_currentMission:getFarmId())
+
+    -- Every row the selection pointed at is gone, so start from the top
+    -- of the new board. On a listen server the rebuild already ran
+    -- synchronously and this redraws it; on a client the contract
+    -- broadcasts arrive moments later and refresh the page again.
+    self.resetSelection = true
     self:updateTabContent()
 end
 
