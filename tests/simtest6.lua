@@ -386,7 +386,7 @@ TransportCompanyManager._replanStuckDriver = function(_, _, contract, _, attempt
     table.insert(recovered, attempt)
 end
 mgr:_recoverBlockedDriver(comp, nudgeContract, nil, aiVehicle,
-    TransportCompanyManager.STUCK_MAX_REPLAN_ATTEMPTS + 1)
+    TransportCompanyManager.STUCK_MAX_RECOVERY_ATTEMPTS + 1)
 ok(#recovered == 1, "over budget goes straight to the replan/give-up path")
 ok(mgr._activeNudges["n1"] == nil, "and does not start another manoeuvre")
 TransportCompanyManager._replanStuckDriver = realReplan

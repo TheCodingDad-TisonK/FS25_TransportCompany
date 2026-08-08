@@ -43,7 +43,9 @@ TransportCompanyManager.MOD_DIRECTORY = nil
 -- player gets from manually cancelling and re-hiring.
 TransportCompanyManager.STUCK_CHECK_INTERVAL_MS = 20000  -- evaluate every 20s
 TransportCompanyManager.STUCK_MIN_DISTANCE_M = 8         -- must cover at least this far
-TransportCompanyManager.STUCK_MAX_REPLAN_ATTEMPTS = 3    -- give up after this many forced replans
+-- Total recovery attempts (reverse manoeuvre or replan) before the
+-- driver is released. Not just replans any more, hence the name.
+TransportCompanyManager.STUCK_MAX_RECOVERY_ATTEMPTS = 5
 
 -- ── Unsticking a blocked driver ────────────────
 -- The base game has no recovery of its own. When the navigation agent
@@ -63,10 +65,14 @@ TransportCompanyManager.STUCK_MAX_REPLAN_ATTEMPTS = 3    -- give up after this m
 -- pause the agent, roll the truck straight back a few metres under
 -- manual wheel control, then hand the target back so the agent replans
 -- from open road.
+-- Distance is duration x speed, less the ramp up from a standstill:
+-- 3.6s at 6 km/h is roughly 5 m of travel against 6 m of theoretical.
+-- The clearance check has to cover the theoretical figure with room to
+-- spare, or the truck reverses into ground nobody sampled.
 TransportCompanyManager.BLOCKED_GRACE_MS = 6000     -- engine trips its own flag at 5000
-TransportCompanyManager.NUDGE_DURATION_MS = 2200    -- how long to reverse for
+TransportCompanyManager.NUDGE_DURATION_MS = 3600    -- how long to reverse for
 TransportCompanyManager.NUDGE_SPEED_KMH = 6         -- slow: a rig reversing fast jackknifes
-TransportCompanyManager.NUDGE_CLEARANCE_M = 8       -- free space needed behind before trying
+TransportCompanyManager.NUDGE_CLEARANCE_M = 12      -- free space needed behind before trying
 
 -- ── Return-to-HQ trip ──────────────────────────
 -- When a hired driver finishes a contract, the truck is dispatched
@@ -1958,7 +1964,7 @@ end
 ---@param vehicle table|nil
 ---@param attempt number How many recoveries this contract has now had
 function TransportCompanyManager:_recoverBlockedDriver(company, contract, truck, vehicle, attempt)
-    if attempt > TransportCompanyManager.STUCK_MAX_REPLAN_ATTEMPTS then
+    if attempt > TransportCompanyManager.STUCK_MAX_RECOVERY_ATTEMPTS then
         self:_replanStuckDriver(company, contract, truck, attempt)
         return
     end
@@ -2167,7 +2173,7 @@ function TransportCompanyManager:_replanStuckDriver(company, contract, truck, at
         contract.hiredDriverJobId = 0
     end
 
-    if attempt > TransportCompanyManager.STUCK_MAX_REPLAN_ATTEMPTS then
+    if attempt > TransportCompanyManager.STUCK_MAX_RECOVERY_ATTEMPTS then
         TransportCompanyLog.info(
             "Contract %s exceeded max replan attempts — releasing the driver",
             tostring(contract.contractId)
