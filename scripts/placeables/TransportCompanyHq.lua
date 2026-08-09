@@ -39,9 +39,13 @@ end
 
 function TransportCompanyHq.registerXMLPaths(schema, basePath)
     schema:setXMLSpecializationType("TransportCompanyHq")
-    -- The HQ currently carries no per-instance XML data. The empty
-    -- <transportCompanyHq /> tag in the placeable XML is the marker
-    -- that activates this specialization's behavior.
+    -- The HQ carries no per-instance XML data: the empty
+    -- <transportCompanyHq /> tag in the placeable XML is just the marker
+    -- that activates this specialization. It still has to be registered,
+    -- or schema validation reports it as an unknown element every time the
+    -- placeable loads.
+    schema:register(XMLValueType.BOOL, basePath .. ".transportCompanyHq#active",
+        "Transport Company HQ marker", true)
     schema:setXMLSpecializationType()
 end
 

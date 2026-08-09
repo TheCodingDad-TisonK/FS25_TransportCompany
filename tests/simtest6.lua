@@ -39,6 +39,7 @@ g_farmManager = {
 }
 g_currentMission = {
     time = 5000,
+    environment = { currentMonotonicDay = 10, dayTime = 0 },
     hud = {},
     addMoney = function(_, amount, farmId, moneyType)
         farmMoney = farmMoney + amount
@@ -61,6 +62,11 @@ g_fillTypeManager = {
 }
 MessageType = { AI_JOB_STOPPED = 1 }
 g_messageCenter = { subscribe = function() end }
+
+-- Terrain height probe used when asking the AI whether a parking spot is
+-- reachable (every base-game nav query feeds it a real Y, AISystem.lua:452).
+g_terrainNode = 0
+function getTerrainHeightAtWorldPos(_, _, _, _) return 0 end
 
 dofile(ROOT .. "/scripts/transportCompany/TransportCompanyContract.lua")
 dofile(ROOT .. "/scripts/transportCompany/TransportCompanyTruck.lua")
@@ -179,15 +185,15 @@ ok(comp:getBoardSize() == 5 + 1, "board size grew with tier",
 
 print("\n-- maintenance --")
 local mTruck = TransportCompanyTruck.new(truckVeh)
-mTruck.distanceM = TransportCompanyTruck.SERVICE_INTERVAL_KM - 1
+mTruck.distanceM = TransportCompanyTruck.SERVICE_INTERVAL_M - 1
 ok(mTruck:checkService() == 0, "no service before the milestone")
-mTruck.distanceM = TransportCompanyTruck.SERVICE_INTERVAL_KM
+mTruck.distanceM = TransportCompanyTruck.SERVICE_INTERVAL_M
 local cost = mTruck:checkService()
 ok(cost == TransportCompanyTruck.SERVICE_BASE_COST, "first service at base cost", cost)
 ok(mTruck.servicesDone == 1, "service counted")
 ok(mTruck.otherCost == cost, "service booked as truck expense")
 ok(mTruck:checkService() == 0, "no double service immediately after")
-mTruck.distanceM = TransportCompanyTruck.SERVICE_INTERVAL_KM * 2
+mTruck.distanceM = TransportCompanyTruck.SERVICE_INTERVAL_M * 2
 local cost2 = mTruck:checkService()
 ok(cost2 > TransportCompanyTruck.SERVICE_BASE_COST, "later services cost more", cost2)
 
@@ -195,7 +201,7 @@ print("\n-- maintenance catch-up charges all due in one bill --")
 -- A truck that comes back from a long drive past several milestones
 -- must pay for them all in ONE check, not one service per tick.
 local catchTruck = TransportCompanyTruck.new(truckVeh)
-catchTruck.distanceM = TransportCompanyTruck.SERVICE_INTERVAL_KM * 5
+catchTruck.distanceM = TransportCompanyTruck.SERVICE_INTERVAL_M * 5
 local catchCost = catchTruck:checkService()
 ok(catchCost > TransportCompanyTruck.SERVICE_BASE_COST * 4, "catch-up bills all overdue", catchCost)
 ok(catchTruck.servicesDone == 5, "catch-up counted all five", catchTruck.servicesDone)
@@ -207,9 +213,14 @@ print("\n-- legacy truck not serviced retroactively --")
 -- past that distance so no retroactive bill lands on load.
 local legacyTruck = TransportCompanyTruck.new(truckVeh)
 legacyTruck.distanceM = 12500
-legacyTruck.nextServiceKm = TransportCompanyTruck.SERVICE_INTERVAL_KM  -- default from old save
+-- A save written under the OLD 5000-metre interval: the stored milestone
+-- is both stale and far below the new one. normalizeService recomputes
+-- rather than stepping, so it lands on the new interval either way.
+legacyTruck.nextServiceM = 15000
 legacyTruck:normalizeService()
-ok(legacyTruck.nextServiceKm > 12500, "milestone rolled past the odometer", legacyTruck.nextServiceKm)
+ok(legacyTruck.nextServiceM > 12500, "milestone rolled past the odometer", legacyTruck.nextServiceM)
+ok(legacyTruck.nextServiceM == TransportCompanyTruck.SERVICE_INTERVAL_M,
+   "stale milestone migrated onto the new interval", legacyTruck.nextServiceM)
 ok(legacyTruck:checkService() == 0, "no service for pre-tracking miles")
 
 print("\n-- weekly wages --")
@@ -218,7 +229,7 @@ farmMoney = 1000000
 local wdrv = D.new("Wage", D.BASE_WEEKLY_WAGE)
 wdrv.driverId = "drv_wage"
 comp.drivers["drv_wage"] = wdrv
-comp.wageTimer = TransportCompanyContract.DAY_LENGTH * 7 - 1
+comp.nextWageDay = TransportCompanyContract.getGameDay() + 7
 local totalWage = comp:getTotalWeeklyWage()
 ok(totalWage > 0, "weekly wage total positive", totalWage)
 mgr:_payWeeklyWages(comp)

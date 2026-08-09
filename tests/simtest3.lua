@@ -14,6 +14,7 @@ MoneyType={MISSIONS="missions",AI="ai"}
 function printWarning() end function printError() end
 TransportCompanyLog={info=function() end,debug=function() end,warning=function() end,error=function() end}
 g_currentMission={ time=5000, hud={}, addMoney=function() end,
+  environment={ currentMonotonicDay=10, dayTime=0 },
   addIngameNotification=function() end, getFarmId=function() return 1 end }
 FSBaseMission={INGAME_NOTIFICATION_OK={}}
 g_i18n={getText=function(_,k) return k end, formatMoney=function(_,v) return tostring(v) end}
@@ -24,6 +25,11 @@ g_fillTypeManager = {
         return { isPalletType = false, hudOverlayFilename = "hud_wheat.png" }
     end,
 }
+
+-- Terrain height probe used when asking the AI whether a parking spot is
+-- reachable (every base-game nav query feeds it a real Y, AISystem.lua:452).
+g_terrainNode = 0
+function getTerrainHeightAtWorldPos(_, _, _, _) return 0 end
 
 dofile(ROOT.."/scripts/transportCompany/TransportCompanyContract.lua")
 dofile(ROOT.."/scripts/transportCompany/TransportCompanyTruck.lua")
@@ -64,7 +70,8 @@ ok(mgr:onAcceptRequest("a1", TransportCompanyAcceptEvent.MODE_SELF, 1), "accept 
 ok(c1.state==C.STATE_ACCEPTED, "state ACCEPTED")
 ok(c1.farmId==1, "farm recorded")
 ok(c1.isHiredDriver==false, "not a hired driver")
-ok(c1.deadline > g_currentMission.time, "deadline starts at accept time", c1.deadline)
+ok(c1.deadline > TransportCompanyContract.getGameDay(),
+   "deadline starts at accept time, in game days", c1.deadline)
 
 print("\n-- refusals --")
 ok(mgr:onAcceptRequest("a1", 1, 1)==false, "cannot accept twice")

@@ -503,8 +503,10 @@ end
 ---read from this company's server-shared settings, except debugMode
 ---which is a global per-player setting on the manager.
 function InGameMenuTransportCompanyFrame:_buildSettingsRows(manager, company)
-    local settings = company ~= nil and company.settings or manager.settings
     for _, def in ipairs(TransportCompanySettings.definitions) do
+        -- Resolved per setting, not once for the tab: local-only settings
+        -- belong to the manager even when a company exists.
+        local settings = manager:getSettingsFor(def, company)
         table.insert(self.rows, {
             cellName = "row",
             setting  = def,
@@ -776,10 +778,12 @@ function InGameMenuTransportCompanyFrame:_buildContractDetail(contract)
     end
     self:_addDetail("transportCompany_contractStatus", g_i18n:getText(stateKey))
 
+    -- getTimeLeft already returns game DAYS (see TransportCompanyContract
+    -- .getGameDay); it used to return milliseconds and needed dividing.
     local timeLeft = contract:getTimeLeft()
     if timeLeft ~= nil then
-        self:_addDetail("transportCompany_contractDeadline", string.format("%.1f d",
-            math.max(0, timeLeft / TransportCompanyContract.DAY_LENGTH)))
+        self:_addDetail("transportCompany_contractDeadline",
+            string.format("%.1f d", math.max(0, timeLeft)))
     end
 
     if contract.state == TransportCompanyContract.STATE_ACCEPTED then
@@ -890,7 +894,7 @@ function InGameMenuTransportCompanyFrame:_buildSettingDetail(def)
     local manager = TransportCompanyManager.getInstance()
     if manager == nil then return false end
 
-    local settings = self._company ~= nil and self._company.settings or manager.settings
+    local settings = manager:getSettingsFor(def, self._company)
 
     if self.detailTitle ~= nil then
         self.detailTitle:setText(
@@ -968,7 +972,7 @@ function InGameMenuTransportCompanyFrame:_applySettingChange(fn)
         return
     end
 
-    local settings = self._company ~= nil and self._company.settings or manager.settings
+    local settings = manager:getSettingsFor(def, self._company)
 
     if not TransportCompanySettings.getIsEditable(def) then
         manager:_notify(g_i18n:getText("transportCompany_settingReadOnly"))
@@ -1009,8 +1013,8 @@ function InGameMenuTransportCompanyFrame:_buildTruckDetail(truck)
     self:_addDetail("transportCompany_fleetJobs", tostring(truck.jobsDelivered))
 
     -- Maintenance: how far until the next service.
-    if truck.nextServiceKm ~= nil then
-        local remaining = math.max(0, truck.nextServiceKm - (truck.distanceM or 0))
+    if truck.nextServiceM ~= nil then
+        local remaining = math.max(0, truck.nextServiceM - (truck.distanceM or 0))
         self:_addDetail("transportCompany_truckNextService",
             g_i18n:formatDistance(remaining, 1))
     end

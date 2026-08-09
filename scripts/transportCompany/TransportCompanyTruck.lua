@@ -31,11 +31,25 @@ local modName = g_currentModName
 TransportCompanyTruck = {}
 local TransportCompanyTruck_mt = Class(TransportCompanyTruck)
 
--- Service interval in meters (5000 km) and the base cost of a service,
--- scaled by how worn the truck is.
-TransportCompanyTruck.SERVICE_INTERVAL_KM = 5000
+-- Maintenance interval, in METRES, because metres is what the odometer is
+-- kept in: distanceM accumulates Vehicle.lastMovedDistance, which is metres
+-- moved per physics tick (Vehicle.lua:1484).
+--
+-- This used to be SERVICE_INTERVAL_KM = 5000 compared straight against
+-- distanceM, so a truck was billed a service every 5 KM — roughly once per
+-- delivery — with the bill escalating each time. The name said km, the
+-- comparison meant metres, and the escalation turned a long day's driving
+-- into six figures of "maintenance".
+--
+-- BALANCE: 100 km is roughly 25 deliveries on a typical map (the sampled
+-- save averaged ~4 km per job). Tune here; nothing else encodes the number.
+TransportCompanyTruck.SERVICE_INTERVAL_M = 100000
 TransportCompanyTruck.SERVICE_BASE_COST = 4000
-TransportCompanyTruck.SERVICE_COST_PER_KM = 0.4
+-- Added to the bill for each service already done, so an older truck costs
+-- more to keep on the road. Kept as a flat step rather than being derived
+-- from the interval: the two are independent knobs, and deriving it meant
+-- retuning the interval silently retuned the cost as well.
+TransportCompanyTruck.SERVICE_COST_ESCALATION = 500
 
 function TransportCompanyTruck.new(vehicle)
     local self = setmetatable({}, TransportCompanyTruck_mt)
@@ -50,10 +64,10 @@ function TransportCompanyTruck.new(vehicle)
     self.distanceM = 0                             -- meters driven while enrolled
     self.jobsDelivered = 0                         -- contracts completed with this truck
     self.isEnrolled = false
-    -- Maintenance: the truck needs a service every SERVICE_INTERVAL_KM
-    -- of odometer distance; the next service milestone and the number
-    -- of services already done persist with the books.
-    self.nextServiceKm = TransportCompanyTruck.SERVICE_INTERVAL_KM
+    -- Maintenance: the truck needs a service every SERVICE_INTERVAL_M
+    -- of odometer distance; the next service milestone (metres) and the
+    -- number of services already done persist with the books.
+    self.nextServiceM = TransportCompanyTruck.SERVICE_INTERVAL_M
     self.servicesDone = 0
     -- Per-tick sampling state (server only)
     self.sampleFillLevels = {}
@@ -73,7 +87,7 @@ function TransportCompanyTruck:saveToXMLFile(xmlFile, key)
     xmlFile:setFloat(key .. "#distanceM", self.distanceM)
     xmlFile:setInt(key .. "#jobsDelivered", self.jobsDelivered)
     xmlFile:setBool(key .. "#isEnrolled", self.isEnrolled)
-    xmlFile:setFloat(key .. "#nextServiceKm", self.nextServiceKm or TransportCompanyTruck.SERVICE_INTERVAL_KM)
+    xmlFile:setFloat(key .. "#nextServiceM", self.nextServiceM or TransportCompanyTruck.SERVICE_INTERVAL_M)
     xmlFile:setInt(key .. "#servicesDone", self.servicesDone or 0)
 end
 
@@ -88,7 +102,11 @@ function TransportCompanyTruck.loadFromXMLFile(xmlFile, key)
     self.distanceM = xmlFile:getFloat(key .. "#distanceM", 0)
     self.jobsDelivered = xmlFile:getInt(key .. "#jobsDelivered", 0)
     self.isEnrolled = xmlFile:getBool(key .. "#isEnrolled", true)
-    self.nextServiceKm = xmlFile:getFloat(key .. "#nextServiceKm", TransportCompanyTruck.SERVICE_INTERVAL_KM)
+    -- The old attribute was #nextServiceKm on a 5000-metre interval. It is
+    -- deliberately not read: normalizeService() recomputes the milestone
+    -- from the odometer at load, which is what migrates a save written
+    -- under the old interval onto the new one.
+    self.nextServiceM = xmlFile:getFloat(key .. "#nextServiceM", TransportCompanyTruck.SERVICE_INTERVAL_M)
     self.servicesDone = xmlFile:getInt(key .. "#servicesDone", 0)
     self.sampleFillLevels = {}
     self.lastSampledDistance = 0
@@ -204,13 +222,21 @@ function TransportCompanyTruck:sampleDistance(vehicle)
     return 0
 end
 
---- Called when the truck starts being tracked: seed fill levels.
-function TransportCompanyTruck:beginSampling(vehicle)
+--- Re-read the diesel level without charging anything, so the next
+--- sampleFuel measures from here. Used while a company is closed: the
+--- baseline has to stay current or re-opening bills for every liter burned
+--- in the meantime as if it happened in one tick.
+function TransportCompanyTruck:resetFuelBaseline(vehicle)
     self.sampleFillLevels = {}
     local index = TransportCompanyTruck.getFuelFillUnitIndex(vehicle)
     if index ~= nil then
         self.sampleFillLevels[index] = vehicle:getFillUnitFillLevel(index)
     end
+end
+
+--- Called when the truck starts being tracked: seed fill levels.
+function TransportCompanyTruck:beginSampling(vehicle)
+    self:resetFuelBaseline(vehicle)
     self.lastSampledDistance = vehicle.lastMovedDistance or 0
     -- A truck that already has odometer distance when it first enrolls
     -- must not be serviced for miles driven before the company tracked
@@ -235,10 +261,10 @@ end
 ---is due and advances the milestone.
 ---@return number cost, 0 when no service is due
 function TransportCompanyTruck:checkService()
-    if self.nextServiceKm == nil then
-        self.nextServiceKm = TransportCompanyTruck.SERVICE_INTERVAL_KM
+    if self.nextServiceM == nil then
+        self.nextServiceM = TransportCompanyTruck.SERVICE_INTERVAL_M
     end
-    if self.distanceM < self.nextServiceKm then
+    if self.distanceM < self.nextServiceM then
         return 0
     end
 
@@ -248,12 +274,11 @@ function TransportCompanyTruck:checkService()
     -- tick until it caught up (cost=4000 then cost=6000 in the same
     -- second, straight from the game log).
     local total = 0
-    while self.distanceM >= self.nextServiceKm do
+    while self.distanceM >= self.nextServiceM do
         total = total + TransportCompanyTruck.SERVICE_BASE_COST
-            + self.servicesDone * TransportCompanyTruck.SERVICE_COST_PER_KM
-            * TransportCompanyTruck.SERVICE_INTERVAL_KM
+            + self.servicesDone * TransportCompanyTruck.SERVICE_COST_ESCALATION
         self.servicesDone = self.servicesDone + 1
-        self.nextServiceKm = self.nextServiceKm + TransportCompanyTruck.SERVICE_INTERVAL_KM
+        self.nextServiceM = self.nextServiceM + TransportCompanyTruck.SERVICE_INTERVAL_M
     end
 
     self.otherCost = (self.otherCost or 0) + total
@@ -264,15 +289,18 @@ end
 ---truck that already carried distance when it started being tracked
 ---(or when a save was made without the maintenance feature) is not
 ---charged retroactively for miles it drove before. Call on enrollment
----and after loading a truck from a savegame. The first service then
----comes SERVICE_INTERVAL_KM after the moment tracking begins.
+---and after loading a truck from a savegame. The first service then falls
+---at the next SERVICE_INTERVAL_M boundary past the current odometer.
 function TransportCompanyTruck:normalizeService()
-    if self.nextServiceKm == nil then
-        self.nextServiceKm = TransportCompanyTruck.SERVICE_INTERVAL_KM
-    end
-    while (self.distanceM or 0) >= self.nextServiceKm do
-        self.nextServiceKm = self.nextServiceKm + TransportCompanyTruck.SERVICE_INTERVAL_KM
-    end
+    local interval = TransportCompanyTruck.SERVICE_INTERVAL_M
+    local distance = self.distanceM or 0
+    -- The first interval boundary strictly above the current odometer,
+    -- computed rather than stepped. Stepping from the stored milestone
+    -- preserved it when it was already ahead, which would strand a save
+    -- written under the old 5000-metre interval on a stale milestone and
+    -- bill one bogus service right after the upgrade. Recomputing is
+    -- idempotent: a truck already past a boundary lands on the same one.
+    self.nextServiceM = (math.floor(distance / interval) + 1) * interval
 end
 
 --- Try to find the live vehicle; returns (vehicle, shouldUnenroll).

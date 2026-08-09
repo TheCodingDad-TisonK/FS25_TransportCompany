@@ -40,8 +40,35 @@ TransportCompanyContract.STATE_ACCEPTED = 2
 TransportCompanyContract.STATE_COMPLETED = 3
 TransportCompanyContract.STATE_EXPIRED = 4
 
--- Day length in ms (base game: 86400000).
+-- One day expressed in Environment.dayTime milliseconds. dayTime runs
+-- 0..86400000 and wraps (Environment.lua:141, :353-356), so this is the
+-- divisor that turns dayTime into a fraction of a day.
+--
+-- It is NOT a length of g_currentMission.time. That clock accumulates raw
+-- unscaled frame dt (BaseMission.lua:770) — MissionManager has to multiply
+-- by getEffectiveTimeScale() itself to get game time (MissionManager.lua:216)
+-- — so 86400000 of it is 24 hours of REAL playtime, not one game day. All
+-- day arithmetic here goes through getGameDay() instead.
 TransportCompanyContract.DAY_LENGTH = 86400000
+
+---The current game day as a monotonic float (day number + fraction of the
+---day elapsed). This is the clock every deadline, wage period and cleanup
+---age in the mod is measured against.
+---
+---Environment keeps currentMonotonicDay as a day counter that never resets
+---across seasons (Environment.lua:128, :356) and dayTime as the position
+---within the day, advanced by dt * getEffectiveTimeScale() (:279). Together
+---they are the only in-game clock that respects the player's day-length
+---setting; g_currentMission.time does not (see DAY_LENGTH above).
+---@return number days
+function TransportCompanyContract.getGameDay()
+    local env = g_currentMission ~= nil and g_currentMission.environment or nil
+    if env == nil then
+        return 0
+    end
+    local fraction = (env.dayTime or 0) / TransportCompanyContract.DAY_LENGTH
+    return (env.currentMonotonicDay or 1) + fraction
+end
 
 -- Base reward curve. The bulk reward is distance-driven: goods value
 -- and a per-meter haul component. RATE_PER_METER is calibrated so the
@@ -80,7 +107,12 @@ TransportCompanyContract.LITERS_PER_PALLET = 1000
 -- dropped on load rather than sitting on the board failing forever:
 -- before this existed, a save carried five jobs whose source stations
 -- could not supply them, and every hire attempt was refused.
-TransportCompanyContract.GENERATOR_VERSION = 4
+--
+-- v5: deadlines moved from g_currentMission.time milliseconds to game days
+-- (getGameDay). A v4 deadline is a number in the hundreds of millions on a
+-- clock that now counts in single digits, so those contracts would never
+-- expire again; they are dropped instead.
+TransportCompanyContract.GENERATOR_VERSION = 5
 
 ---@class TransportCompanyContract
 TransportCompanyContract_mt = Class(TransportCompanyContract)
@@ -108,8 +140,9 @@ function TransportCompanyContract.new()
     self.destUniqueId = nil
     self.destStationIndex = nil
     self.destName = ""
-    -- Timing (game ms, g_currentMission.time). 0 means "not set" —
-    -- never nil, so every comparison below is safe without a guard.
+    -- Timing, in GAME DAYS on the getGameDay() clock. 0 means "not set" —
+    -- never nil, so every comparison below is safe without a guard, and a
+    -- real day number is always >= 1 so 0 can never be mistaken for one.
     self.acceptedTime = 0
     self.deadline = 0
     -- Execution bookkeeping.
@@ -117,6 +150,11 @@ function TransportCompanyContract.new()
     -- Utils.getUniqueId / VehicleSystem.lua:170), so "" is the empty
     -- value here, not 0.
     self.acceptedTruckUniqueId = ""
+    -- Truck that physically tipped a self-hauled load, matched by the
+    -- station hook (onGoodsDelivered). Persisted and synced like any other
+    -- field: without it a save taken mid-haul lost the attribution and the
+    -- Fleet tab credited the job to nobody.
+    self.deliveryTruckUniqueId = ""
     self.farmId = 0                  -- farm that accepted the contract
     self.isHiredDriver = false
     self.hiredDriverJobId = 0        -- base game AI job id while driving
@@ -148,6 +186,7 @@ function TransportCompanyContract:writeStream(streamId, connection)
     streamWriteFloat32(streamId, self.acceptedTime or 0)
     streamWriteFloat32(streamId, self.deadline or 0)
     streamWriteString(streamId, self.acceptedTruckUniqueId or "")
+    streamWriteString(streamId, self.deliveryTruckUniqueId or "")
     streamWriteInt32(streamId, self.farmId or 0)
     streamWriteBool(streamId, self.isHiredDriver)
     streamWriteInt32(streamId, self.hiredDriverJobId or 0)
@@ -175,6 +214,7 @@ function TransportCompanyContract:readStream(streamId, connection)
     self.acceptedTime = streamReadFloat32(streamId)
     self.deadline = streamReadFloat32(streamId)
     self.acceptedTruckUniqueId = streamReadString(streamId)
+    self.deliveryTruckUniqueId = streamReadString(streamId)
     self.farmId = streamReadInt32(streamId)
     self.isHiredDriver = streamReadBool(streamId)
     self.hiredDriverJobId = streamReadInt32(streamId)
@@ -201,6 +241,7 @@ function TransportCompanyContract:saveToXMLFile(xmlFile, key)
     xmlFile:setFloat(key .. "#acceptedTime", self.acceptedTime or 0)
     xmlFile:setFloat(key .. "#deadline", self.deadline or 0)
     xmlFile:setString(key .. "#acceptedTruckUniqueId", self.acceptedTruckUniqueId or "")
+    xmlFile:setString(key .. "#deliveryTruckUniqueId", self.deliveryTruckUniqueId or "")
     xmlFile:setInt(key .. "#farmId", self.farmId or 0)
     xmlFile:setBool(key .. "#isHiredDriver", self.isHiredDriver)
     xmlFile:setInt(key .. "#hiredDriverJobId", self.hiredDriverJobId or 0)
@@ -229,6 +270,7 @@ function TransportCompanyContract:loadFromXMLFile(xmlFile, key)
     self.acceptedTime = xmlFile:getFloat(key .. "#acceptedTime", 0)
     self.deadline = xmlFile:getFloat(key .. "#deadline", 0)
     self.acceptedTruckUniqueId = xmlFile:getString(key .. "#acceptedTruckUniqueId", "")
+    self.deliveryTruckUniqueId = xmlFile:getString(key .. "#deliveryTruckUniqueId", "")
     self.farmId = xmlFile:getInt(key .. "#farmId", 0)
     self.isHiredDriver = xmlFile:getBool(key .. "#isHiredDriver", false)
     self.hiredDriverJobId = xmlFile:getInt(key .. "#hiredDriverJobId", 0)
@@ -314,21 +356,22 @@ function TransportCompanyContract:getIsComplete()
         or (self.delivered >= self.amount - 0.001)
 end
 
---- Time remaining in ms; nil when no deadline is set.
+--- Days remaining before the deadline; nil when no deadline is set.
+---@return number|nil days
 function TransportCompanyContract:getTimeLeft()
     if self.deadline == nil or self.deadline == 0 or g_currentMission == nil then
         return nil
     end
-    return self.deadline - g_currentMission.time
+    return self.deadline - TransportCompanyContract.getGameDay()
 end
 
 --- Is the contract past its deadline?
----@param now number|nil Optional clock override (defaults to mission time)
+---@param now number|nil Optional clock override, in game days
 function TransportCompanyContract:getIsExpired(now)
     if self.deadline == nil or self.deadline == 0 then
         return false
     end
-    now = now or (g_currentMission ~= nil and g_currentMission.time)
+    now = now or (g_currentMission ~= nil and TransportCompanyContract.getGameDay())
     if now == nil then
         return false
     end
@@ -424,7 +467,7 @@ function TransportCompanyContract:accept(farmId, truckUniqueId, isHiredDriver)
     self.farmId = farmId or 0
     self.acceptedTruckUniqueId = truckUniqueId or ""
     self.isHiredDriver = isHiredDriver == true
-    self.acceptedTime = g_currentMission ~= nil and g_currentMission.time or 0
+    self.acceptedTime = TransportCompanyContract.getGameDay()
     return true
 end
 
@@ -436,7 +479,7 @@ function TransportCompanyContract:complete()
     end
     self.state = TransportCompanyContract.STATE_COMPLETED
     self.delivered = self.amount
-    self.completedTime = g_currentMission ~= nil and g_currentMission.time or 0
+    self.completedTime = TransportCompanyContract.getGameDay()
     return true
 end
 
@@ -448,7 +491,7 @@ function TransportCompanyContract:expire()
         return false
     end
     self.state = TransportCompanyContract.STATE_EXPIRED
-    self.completedTime = g_currentMission ~= nil and g_currentMission.time or 0
+    self.completedTime = TransportCompanyContract.getGameDay()
     return true
 end
 
@@ -581,7 +624,8 @@ end
 function TransportCompanyContract.countRoutes(farmId)
     local storageSystem = g_currentMission ~= nil and g_currentMission.storageSystem
     if storageSystem == nil then
-        return 0, 0
+        -- All five, or the caller's string.format lands on a nil.
+        return 0, 0, 0, 0, 0
     end
 
     local ai, stocked, any, stations, orphan = 0, 0, 0, 0, 0
@@ -829,20 +873,26 @@ function TransportCompanyContract.generate(deadlineDays, farmId)
     local available = source.available or 0
     local knowsStock = available > 0
 
-    local tierRewardFactor = 1
+    -- Tier shapes how much is asked for. It scales the ROLLED amount,
+    -- before the stock and fleet caps, so the caps stay the last word: a
+    -- bulk job still fits in MAX_TRIPS_PER_JOB loads and still never asks
+    -- for more than the source holds. Applied after the caps (as it was)
+    -- it simply overrode both, and every bulk contract came out at exactly
+    -- 1.5x the cap — 4.5 trips, and more than the silo had.
+    --
+    -- The reward multiplier is deliberately not duplicated here:
+    -- computeBulkReward / computePalletReward read it from
+    -- getTierRewardFactor themselves, so there is one source of truth.
     local tierAmountFactor = 1
-    if contract.tier == TransportCompanyContract.CONTRACT_TIER_URGENT then
-        tierRewardFactor = 1.5
-    elseif contract.tier == TransportCompanyContract.CONTRACT_TIER_BULK then
+    if contract.tier == TransportCompanyContract.CONTRACT_TIER_BULK then
         tierAmountFactor = 1.5
-        tierRewardFactor = 0.85
     end
 
     if contract.contractType == TransportCompanyContract.CONTRACT_TYPE_PALLET then
         -- Pallet contract: counted in pallets, delivered in liters.
         -- Reward is the per-object base scaled by the live price, so a
         -- pallet of gold pays more than a pallet of flour.
-        local amount = math.random(4, 12)
+        local amount = math.floor(math.random(4, 12) * tierAmountFactor)
         if knowsStock then
             amount = math.min(amount,
                 math.floor(available / TransportCompanyContract.LITERS_PER_PALLET))
@@ -856,12 +906,12 @@ function TransportCompanyContract.generate(deadlineDays, farmId)
         if amount < 1 then
             return nil
         end
-        contract.amount = math.max(1, math.floor(amount * tierAmountFactor))
+        contract.amount = amount
         contract.litersPerUnit = TransportCompanyContract.LITERS_PER_PALLET
         contract.reward = TransportCompanyContract.computePalletReward(
             contract.amount, pricePerLiter, contract.tier)
     else
-        local amount = math.random(8000, 24000)
+        local amount = math.floor(math.random(8000, 24000) * tierAmountFactor)
         if knowsStock then
             amount = math.min(amount, math.floor(available))
         end
@@ -873,8 +923,7 @@ function TransportCompanyContract.generate(deadlineDays, farmId)
         if amount < TransportCompanyContract.MIN_SOURCE_LITERS then
             return nil
         end
-        contract.amount = math.max(TransportCompanyContract.MIN_SOURCE_LITERS,
-            math.floor(amount * tierAmountFactor))
+        contract.amount = amount
         contract.litersPerUnit = 1
         contract.reward = TransportCompanyContract.computeBulkReward(
             contract.amount, pricePerLiter, contract.routeDistanceM, contract.tier)
@@ -886,12 +935,14 @@ function TransportCompanyContract.generate(deadlineDays, farmId)
     -- Deadline from the configured contractDeadlineDays setting; the
     -- base TransportMission uses ~3.2 game days as its own reference.
     -- Urgent jobs run on half the clock (never less than a day).
+    -- Measured in GAME days (getGameDay), so the player's day-length
+    -- setting is respected — on the old mission-time clock a "3 day"
+    -- deadline meant 72 hours of real playtime and never came due.
     local deadlineDays = deadlineDays or 3
     if contract.tier == TransportCompanyContract.CONTRACT_TIER_URGENT then
         deadlineDays = math.max(1, math.ceil(deadlineDays * 0.5))
     end
-    contract.deadline = g_currentMission.time
-        + TransportCompanyContract.DAY_LENGTH * deadlineDays
+    contract.deadline = TransportCompanyContract.getGameDay() + deadlineDays
 
     -- A contract nobody can resolve is worse than no contract at all.
     if not contract:_resolveStationRefs() then
@@ -1018,11 +1069,18 @@ function TransportCompanyContract.getVehicleAiCapacity(vehicle)
         end
     end
 
-    addFor(vehicle)
-    if vehicle.getChildVehicles ~= nil then
-        for _, child in ipairs(vehicle:getChildVehicles() or {}) do
+    -- getChildVehicles() ALREADY includes the root vehicle itself:
+    -- Vehicle:addChildVehicles does table.insert(vehicles, self) before
+    -- recursing (Vehicle.lua:2152-2154). Adding the root separately on top
+    -- of the loop counted a rigid truck's own bed twice and oversized every
+    -- contract generated for that farm.
+    local children = vehicle.getChildVehicles ~= nil and vehicle:getChildVehicles() or nil
+    if children ~= nil and #children > 0 then
+        for _, child in ipairs(children) do
             addFor(child)
         end
+    else
+        addFor(vehicle)
     end
     return total
 end

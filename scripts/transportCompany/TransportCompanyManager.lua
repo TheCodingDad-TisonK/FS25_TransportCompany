@@ -428,6 +428,23 @@ end
 
 -- ── Settings ────────────────────────────────────
 
+---Which settings object actually owns a given setting.
+---
+---Local-only settings (debugMode) are per-player and live on the manager;
+---everything else is server-shared company state. The PDA used to hand the
+---whole Settings tab to the company's object whenever a company existed, so
+---toggling Debug Mode wrote to a copy nobody reads — TransportCompanyLog
+---asks the manager — and the change appeared to do nothing at all.
+---@param def table A TransportCompanySettings.definitions entry
+---@param company TransportCompanyCompany|nil
+---@return TransportCompanySettings
+function TransportCompanyManager:getSettingsFor(def, company)
+    if def ~= nil and def.localOnly then
+        return self.settings
+    end
+    return (company ~= nil and company.settings) or self.settings
+end
+
 ---Reload settings from disk (called from console command).
 function TransportCompanyManager:reloadSettings()
     self.settings:loadSettings()
@@ -588,6 +605,27 @@ function TransportCompanyManager:_getCompanyFarmId()
     return 0
 end
 
+---Does this farm still have an HQ in the manager's own registry?
+---
+---This is the test to use while an HQ is being removed. The world scan in
+---_hasHq cannot be: Placeable:onSell raises its event with the placeable
+---STILL in placeableSystem.placeables (Placeable.lua:874), and removal only
+---happens later, inside delete() at :568 — before onDelete at :577. So on a
+---sell, _hasHq still saw the HQ being sold and reported the farm covered,
+---the company was never archived, and onDelete then found isActive already
+---false and stayed silent. The registry, by contrast, has already had the
+---entry cleared by the caller.
+---@param farmId number
+---@return boolean
+function TransportCompanyManager:_hasRegisteredHq(farmId)
+    for _, placeable in pairs(self.hqPlaceables) do
+        if placeable ~= nil and self:_getHqFarmId(placeable) == farmId then
+            return true
+        end
+    end
+    return false
+end
+
 ---Check whether the given farm has at least one HQ.
 ---Drives the PDA tab's enabling predicate, so in multiplayer it must
 ---not be satisfied by a rival farm's headquarters.
@@ -662,8 +700,10 @@ function TransportCompanyManager:onHqChanged(placeable, isActive, suppressBoard)
     else
         self.hqPlaceables[uniqueId] = nil
         TransportCompanyLog.info("HQ removed: %s (farm %s)", uniqueId, tostring(farmId))
-        -- Archive the company only when this farm has no HQ left.
-        if company ~= nil and not self:_hasHq(farmId) then
+        -- Archive the company only when this farm has no HQ left. Asked of
+        -- the registry (the entry above is already gone), never of the world
+        -- scan — see _hasRegisteredHq for why the scan lies during a sell.
+        if company ~= nil and not self:_hasRegisteredHq(farmId) then
             company:archive()
             TransportCompanyLog.info("Company archived for farm %s", tostring(farmId))
         end
@@ -918,6 +958,11 @@ function TransportCompanyManager:_saveCompanyToFile(company, filePath)
     -- Business-sim state (R4)
     xmlFile:setFloat("transportCompany.reputation#value", company.reputation or 0)
     xmlFile:setInt("transportCompany.hq#level", company.hqLevel or TransportCompanyCompany.HQ_BASE_LEVEL)
+    -- Payroll watermark, in game days. Persisted so saving and reloading
+    -- does not push payday out by another week every time.
+    if company.nextWageDay ~= nil then
+        xmlFile:setFloat("transportCompany.payroll#nextWageDay", company.nextWageDay)
+    end
     local histIdx = 0
     for _, period in ipairs(company.ledgerHistory or {}) do
         local key = string.format("transportCompany.history.period(%d)", histIdx)
@@ -1037,6 +1082,8 @@ function TransportCompanyManager:_loadCompanyFromFile(company, filePath)
     -- Business-sim state (R4). Defaults keep pre-R4 saves working.
     company.reputation = xmlFile:getFloat("transportCompany.reputation#value", 0)
     company.hqLevel = xmlFile:getInt("transportCompany.hq#level", TransportCompanyCompany.HQ_BASE_LEVEL)
+    -- nil when absent (a pre-payroll save), which re-seeds a week out.
+    company.nextWageDay = xmlFile:getFloat("transportCompany.payroll#nextWageDay", nil)
     local histIdx = 0
     while true do
         local key = string.format("transportCompany.history.period(%d)", histIdx)
@@ -1213,11 +1260,20 @@ function TransportCompanyManager:update(dt)
                 self:_broadcastBooks(farmId)
             end
 
-            -- Pay the drivers' weekly base wages once a game week.
-            company.wageTimer = (company.wageTimer or 0) + dt
-            if company.wageTimer >= TransportCompanyContract.DAY_LENGTH * 7 then
-                company.wageTimer = 0
-                self:_payWeeklyWages(company)
+            -- Pay the drivers' weekly base wages once a game WEEK, timed on
+            -- the game-day clock rather than accumulated dt. dt is real
+            -- frame time, so the old `wageTimer >= DAY_LENGTH * 7` threshold
+            -- wanted 168 hours of continuous play and the payroll never ran
+            -- once. The loop settles every week missed across a long sleep
+            -- or a fast-forward instead of dribbling one out per frame.
+            local today = TransportCompanyContract.getGameDay()
+            if company.nextWageDay == nil then
+                company.nextWageDay = today + 7
+            else
+                while today >= company.nextWageDay do
+                    company.nextWageDay = company.nextWageDay + 7
+                    self:_payWeeklyWages(company)
+                end
             end
         end
     end
@@ -1293,7 +1349,7 @@ end
 ---@param jobs number
 ---@param km number
 function TransportCompanyManager:_rollLedgerPeriod(company, revenue, wages, jobs, km)
-    local periodIndex = math.floor(g_currentMission.time / (TransportCompanyContract.DAY_LENGTH * 7))
+    local periodIndex = math.floor(TransportCompanyContract.getGameDay() / 7)
     local history = company.ledgerHistory or {}
     local last = history[#history]
     if last == nil or last.index ~= periodIndex then
@@ -1315,7 +1371,10 @@ end
 ---companies. Called every frame; see the note in update().
 function TransportCompanyManager:_sampleDistance()
     for _, company in pairs(self.companies) do
-        if company ~= nil then
+        -- A closed or archived company keeps no books, the same gate
+        -- _checkMaintenance already applied. Without it a company switched
+        -- off still ran its odometer up and billed the fuel behind it.
+        if company ~= nil and company:getIsActive() then
             for _, truck in pairs(company.trucks) do
                 if truck.isEnrolled then
                     local vehicle = truck:getVehicle()
@@ -1332,10 +1391,21 @@ end
 function TransportCompanyManager:_sampleTrucks(dt)
     for _, company in pairs(self.companies) do
         if company ~= nil then
+            -- Same gate as _sampleDistance: a closed company burns no
+            -- diesel on the books.
+            local isActive = company:getIsActive()
             for _, truck in pairs(company.trucks) do
                 local vehicle = truck:getVehicle()
                 if vehicle ~= nil and not vehicle:getIsBeingDeleted() then
-                    truck:sampleFuel(vehicle, dt)
+                    if isActive then
+                        truck:sampleFuel(vehicle, dt)
+                    else
+                        -- Closed: charge nothing, but keep the baseline
+                        -- current. Letting it go stale would bill the whole
+                        -- tank burned while the company was shut the moment
+                        -- the player switched it back on.
+                        truck:resetFuelBaseline(vehicle)
+                    end
                 elseif truck.isEnrolled then
                     -- Truck sold or deleted: stop sampling, keep the books.
                     truck.isEnrolled = false
@@ -1355,7 +1425,7 @@ end
 ---savegame lean and lets a fresh job take the slot. Without this the
 ---board froze with the same jobs forever and then slowly emptied.
 function TransportCompanyManager:_checkDeadlines()
-    local now = g_currentMission.time
+    local now = TransportCompanyContract.getGameDay()
 
     for farmId, company in pairs(self.companies) do
         if company ~= nil and company:getIsActive() then
@@ -1549,11 +1619,6 @@ function TransportCompanyManager:onAcceptRequest(contractId, mode, farmId)
         return false
     end
 
-    -- The deadline clock starts now, not at generation time.
-    local deadlineDays = company.settings:get("contractDeadlineDays") or 7
-    contract.deadline = g_currentMission.time
-        + TransportCompanyContract.DAY_LENGTH * deadlineDays
-
     local truck = isHire and self:_findTruckForContract(company, contract, farmId) or nil
 
     if isHire then
@@ -1582,6 +1647,14 @@ function TransportCompanyManager:onAcceptRequest(contractId, mode, farmId)
         return false
     end
 
+    -- The deadline clock starts on acceptance, not at generation time, and
+    -- only once the job is definitely taken. Setting it before the checks
+    -- above meant every refused hire still reset the clock, so hammering
+    -- Hire on a job that could never be hired kept it on the board forever.
+    local previousDeadline = contract.deadline
+    local deadlineDays = company.settings:get("contractDeadlineDays") or 7
+    contract.deadline = TransportCompanyContract.getGameDay() + deadlineDays
+
     if isHire then
         local started, reason = self:_dispatchHiredDriver(company, contract, truck)
         if not started then
@@ -1591,6 +1664,8 @@ function TransportCompanyManager:onAcceptRequest(contractId, mode, farmId)
             contract.isHiredDriver = false
             contract.acceptedTruckUniqueId = ""
             contract.farmId = 0
+            contract.acceptedTime = 0
+            contract.deadline = previousDeadline
             self:_notify(reason or g_i18n:getText("transportCompany_noTruck"), farmId)
             return false
         end
@@ -1672,8 +1747,9 @@ function TransportCompanyManager:_findTruckForContract(company, contract, farmId
             -- getIsAvailableForVehicle is the engine's own suitability
             -- test (AIJobLoadAndDeliver.lua:376): AI-capable, not in
             -- use, and has both loading and discharge nodes.
-            if vehicle ~= nil and not vehicle:getIsBeingDeleted()
-               and probe:getIsAvailableForVehicle(vehicle) then
+            local isUsable = vehicle ~= nil and not vehicle:getIsBeingDeleted()
+                and probe:getIsAvailableForVehicle(vehicle)
+            if isUsable then
                 -- Prefer a truck that has a named driver assigned: that
                 -- is the truck the player staffed, so the driver's record
                 -- moves with the job. First usable truck is the fallback
@@ -1684,8 +1760,12 @@ function TransportCompanyManager:_findTruckForContract(company, contract, farmId
                 if company:getDriverForTruck(truck.uniqueId) ~= nil then
                     return truck
                 end
+            else
+                -- Only actual rejections. This used to run for every truck
+                -- considered, so the log announced the very truck that was
+                -- about to be dispatched as "rejected".
+                self:_logHireRejection(truck, vehicle)
             end
-            self:_logHireRejection(truck, vehicle)
         end
     end
 
@@ -2006,9 +2086,13 @@ function TransportCompanyManager:_hasSpaceBehind(vehicle)
     -- caught as well as one at the far end of the manoeuvre.
     for distance = 2, TransportCompanyManager.NUDGE_CLEARANCE_M, 2 do
         local x, y, z = localToWorld(node, 0, 0, -distance)
-        local ok, _, isBlocking = pcall(getVehicleNavigationMapCostAtWorldPos, navMap, x, y, z)
+        local ok, cost, isBlocking = pcall(getVehicleNavigationMapCostAtWorldPos, navMap, x, y, z)
         if not ok then return false end
-        if isBlocking then return false end
+        -- BOTH halves of the engine's own verdict. AISystem:getIsPositionReachable
+        -- returns `costs ~= 255 and not isBlocking` (AISystem.lua:413-423) —
+        -- reading only the blocking flag accepted impassable cells and
+        -- reversed the truck into them.
+        if isBlocking or cost == 255 then return false end
     end
     return true
 end
@@ -2218,14 +2302,35 @@ end
 ---SellingStation overrides the method and only sometimes calls its
 ---super (SellingStation.lua:305-327), so both classes are hooked and a
 ---depth counter keeps the inner super call from crediting twice.
+---
+---The depth MUST be taken before superFunc runs. A production point owned
+---by the player is a SellingStation whose getStoreGoods returns true
+---(ProductionPoint.lua:242-247), which sends addFillLevelFromTool down the
+---super call at SellingStation.lua:327 — straight into this same hook. With
+---the counter incremented after superFunc returned, the nested call saw
+---depth 0, credited, returned, and then the outer call saw depth 0 and
+---credited the identical liters again: every delivery to your own dairy or
+---mill counted double and completed contracts on half the load.
 function TransportCompanyManager:_installDeliveryHooks()
     local function makeHook(className)
         return function(station, superFunc, farmId, deltaFillLevel, fillType, fillInfo, toolType, extraAttributes)
-            local moved = superFunc(station, farmId, deltaFillLevel, fillType, fillInfo, toolType, extraAttributes)
             local mgr = g_transportCompanyManager
+            local isOutermost = false
             if mgr ~= nil then
                 mgr._deliveryDepth = (mgr._deliveryDepth or 0) + 1
-                if mgr._deliveryDepth == 1 and moved ~= nil and moved > 0 then
+                isOutermost = mgr._deliveryDepth == 1
+            end
+
+            -- Wrapped only so the depth can unwind on the way out: an error
+            -- escaping here with the counter still raised would make every
+            -- later delivery look nested and silently credit nothing. The
+            -- error itself is re-raised below, unchanged.
+            local okSuper, moved = pcall(
+                superFunc, station, farmId, deltaFillLevel, fillType, fillInfo, toolType, extraAttributes
+            )
+
+            if mgr ~= nil then
+                if okSuper and isOutermost and moved ~= nil and moved > 0 then
                     local ok, err = pcall(
                         mgr.onGoodsDelivered, mgr, station, farmId, moved, fillType
                     )
@@ -2236,6 +2341,13 @@ function TransportCompanyManager:_installDeliveryHooks()
                     end
                 end
                 mgr._deliveryDepth = mgr._deliveryDepth - 1
+            end
+
+            if not okSuper then
+                -- Re-raise with the depth already unwound, so one throwing
+                -- delivery does not wedge the counter and mute every credit
+                -- for the rest of the session.
+                error(moved, 0)
             end
             return moved
         end
@@ -2406,9 +2518,12 @@ function TransportCompanyManager:_completeContract(company, contract)
     company.ledger.driverWages = company.ledger.driverWages + driverCut
     company.ledger.jobs = company.ledger.jobs + 1
 
-    -- P&L rollup for the Ledger tab's weekly history.
+    -- P&L rollup for the Ledger tab's weekly history. The distance booked
+    -- is THIS job's route in km, not the truck's lifetime odometer: passing
+    -- the odometer re-added the entire running total on every completion,
+    -- so the weekly figure grew quadratically and meant nothing.
     self:_rollLedgerPeriod(company, companyRevenue, driverCut, 1,
-        truck ~= nil and truck.distanceM or 0)
+        (contract.routeDistanceM or 0) / 1000)
 
     -- Reputation: an on-time delivery builds the company. Urgent jobs
     -- earn a touch more; bulk a touch less, matching the reward curve.
@@ -2644,6 +2759,10 @@ function TransportCompanyManager:_dispatchReturnToHq(company, contract)
                     contract = contract,
                     timer = TransportCompanyManager.RETURN_RETRY_DELAY_MS,
                 })
+            else
+                -- Out of retries: drop the marker so the table does not
+                -- accumulate an entry per contract for the whole session.
+                self._returnRetried[contract.contractId] = nil
             end
             TransportCompanyLog.debug(
                 "return-to-HQ validate failed for %s: %s",
@@ -2652,6 +2771,7 @@ function TransportCompanyManager:_dispatchReturnToHq(company, contract)
             return false
         end
 
+        self._returnRetried[contract.contractId] = nil
         g_currentMission.aiSystem:startJob(job, company.farmId)
         TransportCompanyLog.info(
             "Truck %s returning to HQ (farm %s)",
@@ -2701,7 +2821,14 @@ function TransportCompanyManager:_getHqParkingTarget(farmId)
                 for _, axis in ipairs(worldAxes) do
                     local px = hx + axis[1] * distance
                     local pz = hz + axis[2] * distance
-                    if g_currentMission.aiSystem:getIsPositionReachable(px, 0, pz) then
+                    -- Sample the terrain for Y. The nav-map lookup behind
+                    -- getIsPositionReachable is a 3D world-position query and
+                    -- every base-game caller feeds it
+                    -- getTerrainHeightAtWorldPos (AISystem.lua:452, :777);
+                    -- a hardcoded 0 asks about a point under the map on any
+                    -- terrain that is not at sea level.
+                    local py = getTerrainHeightAtWorldPos(g_terrainNode, px, 0, pz)
+                    if g_currentMission.aiSystem:getIsPositionReachable(px, py, pz) then
                         return px, pz
                     end
                 end
@@ -2763,7 +2890,14 @@ function TransportCompanyManager:_broadcastBooks(farmId)
 
     local company = self:getCompany(farmId)
     if company == nil then return end
-    if next(company.trucks) == nil and company.ledger.jobs == 0 then
+    -- Skip only a company with genuinely nothing to report. Drivers count:
+    -- gating on trucks-and-jobs alone meant a farm that had just hired its
+    -- first driver pushed no snapshot, so the Drivers tab stayed empty on
+    -- every client until the first delivery landed.
+    if next(company.trucks) == nil and next(company.drivers) == nil
+       and company.ledger.jobs == 0 and (company.reputation or 0) == 0
+       and (company.hqLevel or TransportCompanyCompany.HQ_BASE_LEVEL)
+           <= TransportCompanyCompany.HQ_BASE_LEVEL then
         return
     end
 
@@ -2905,6 +3039,12 @@ function TransportCompanyManager:onContractEvent(eventType, contract, state, far
         company.contracts[contract.contractId] = contract
     elseif eventType == TransportCompanyContractEvent.TYPE_STATE_CHANGE then
         contract.state = state
+        -- Store it, like every other event type does. `contract` here is a
+        -- fresh object built by readStream, so setting its state and
+        -- dropping it left the client's own copy stuck on ACCEPTED: on a
+        -- dedicated server, delivered and expired jobs sat on the Dispatch
+        -- board forever and never reached the Ledger.
+        company.contracts[contract.contractId] = contract
         if state == TransportCompanyContract.STATE_COMPLETED then
             self:_cleanupCompletedContracts(company)
         end
@@ -2919,8 +3059,8 @@ end
 ---7 days to keep the savegame XML lean.
 ---@param company TransportCompanyCompany
 function TransportCompanyManager:_cleanupCompletedContracts(company)
-    local now = g_currentMission.time
-    local maxAge = TransportCompanyContract.DAY_LENGTH * 7
+    local now = TransportCompanyContract.getGameDay()
+    local maxAge = 7   -- game days; completedTime is on the same clock
 
     for contractId, contract in pairs(company.contracts) do
         if contract.state == TransportCompanyContract.STATE_COMPLETED or
@@ -3244,10 +3384,17 @@ function TransportCompanyManager:_registerHints()
             true
         )
 
+        -- Initially active, like the dispatch hint above. registerHint's
+        -- third argument means "visible from the start", not "already
+        -- dismissed": it sets alreadyShown and pushes the text into
+        -- shownHints, which is the list the Hints page renders
+        -- (IntroductionHelpSystem.lua:39-49, :272). Registered with false a
+        -- hint stays hidden until something calls showHint() for it, and
+        -- nothing here ever did — so this one was simply never reachable.
         g_currentMission.introductionHelpSystem:registerHint(
             "transportCompany_fleet",
             g_i18n:getText("transportCompany_hint_fleet"),
-            false
+            true
         )
 
         TransportCompanyLog.info("Intro hints registered")

@@ -26,7 +26,8 @@ g_currentModName = "FS25_TransportCompany"
 FillType = { UNKNOWN = 0, DIESEL = 1, WHEAT = 2 }
 MoneyType = { MISSIONS = "m", AI = "ai" }
 InputAction = { MENU_BACK = 1, MENU_ACTIVATE = 2, MENU_EXTRA_1 = 3 }
-g_currentMission = { time = 5000, getFarmId = function() return 1 end }
+g_currentMission = { time = 5000, getFarmId = function() return 1 end,
+    environment = { currentMonotonicDay = 10, dayTime = 0 } }
 g_i18n = {
     getText = function(_, k)
         -- Return a body value containing a literal backslash-n (as the
@@ -83,6 +84,11 @@ g_gui = {
         end
     end,
 }
+
+-- Terrain height probe used when asking the AI whether a parking spot is
+-- reachable (every base-game nav query feeds it a real Y, AISystem.lua:452).
+g_terrainNode = 0
+function getTerrainHeightAtWorldPos(_, _, _, _) return 0 end
 
 dofile(ROOT .. "/scripts/transportCompany/TransportCompanyContract.lua")
 dofile(ROOT .. "/scripts/transportCompany/TransportCompanyTruck.lua")
