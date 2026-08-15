@@ -77,10 +77,15 @@ function TransportCompanyCompany.new(farmId)
     -- board and all bookkeeping pause until an HQ is placed again.
     self.isArchived = false
 
-    -- Per-company timer buckets (board top-up, books sync), server.
+    -- Per-company timer buckets (board top-up, books sync), server. These
+    -- two are real-time housekeeping intervals, so accumulated dt is the
+    -- right clock for them.
     self.boardTimer = 0
     self.booksSyncTimer = 0
-    self.wageTimer = 0
+    -- Payroll is NOT: it falls due on a game day (getGameDay), so it is a
+    -- watermark rather than a dt bucket. nil means "not seeded yet"; the
+    -- update loop sets it a week out the first time it sees the company.
+    self.nextWageDay = nil
 
     -- ── Business-sim state (R4) ──────────────────────────────
     -- driverId → TransportCompanyDriver (the payroll).
@@ -116,7 +121,7 @@ function TransportCompanyCompany:clearRuntime()
     self.stuckWatch = {}
     self.boardTimer = 0
     self.booksSyncTimer = 0
-    self.wageTimer = 0
+    self.nextWageDay = nil
 end
 
 ---Archive the company: pause operations but keep the books.
@@ -175,14 +180,24 @@ function TransportCompanyCompany:getNextHqUpgradeCost()
     return TransportCompanyCompany.HQ_UPGRADE_COST[self.hqLevel - TransportCompanyCompany.HQ_BASE_LEVEL + 1]
 end
 
----Raise the HQ tier if the farm can pay.
+---Raise the HQ tier if the farm could afford it.
+---
+---NOTE: this checks affordability and upgrades, but does NOT move any
+---money — the caller must charge the farm. The shipped path into the HQ
+---tier is TransportCompanyManager:_upgradeHq, which charges and then calls
+---hqUpgrade() directly; this helper exists for callers that have already
+---settled up.
 ---@return boolean upgraded
 function TransportCompanyCompany:tryUpgradeHq()
     local cost = self:getNextHqUpgradeCost()
     if cost == nil then
         return false
     end
-    if g_currentMission == nil or g_currentMission:getFarmMoney(self.farmId) < cost then
+    -- The balance lives on the Farm, not on the mission: FS25 has no
+    -- g_currentMission:getFarmMoney (it is Farm:getBalance, reached via
+    -- g_farmManager), so the old call would have thrown on first use.
+    local farm = g_farmManager ~= nil and g_farmManager:getFarmById(self.farmId) or nil
+    if farm == nil or farm.getBalance == nil or (farm:getBalance() or 0) < cost then
         return false
     end
     self:hqUpgrade()

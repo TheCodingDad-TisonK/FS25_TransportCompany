@@ -18,7 +18,10 @@ function Class(target, base)
 end
 g_currentModName = "FS25_TransportCompany"
 FillType = { UNKNOWN = 0, DIESEL = 1, WHEAT = 2 }
-g_currentMission = { time = 1000 }
+-- The mod's day clock is Environment (TransportCompanyContract
+-- .getGameDay), not mission.time, which counts real playtime.
+g_currentMission = { time = 1000,
+  environment = { currentMonotonicDay = 10, dayTime = 0 } }
 g_i18n = { getText = function(_, k) return k end }
 g_fillTypeManager = {
     getFillTypeNameByIndex = function() return "wheat" end,
@@ -31,6 +34,11 @@ function printWarning(s) end
 function printError(s) end
 TransportCompanyLog = { info=function() end, debug=function() end,
                         warning=function() end, error=function() end }
+
+-- Terrain height probe used when asking the AI whether a parking spot is
+-- reachable (every base-game nav query feeds it a real Y, AISystem.lua:452).
+g_terrainNode = 0
+function getTerrainHeightAtWorldPos(_, _, _, _) return 0 end
 
 dofile(ROOT .. "/scripts/transportCompany/TransportCompanyContract.lua")
 dofile(ROOT .. "/scripts/transportCompany/TransportCompanyTruck.lua")
@@ -73,7 +81,8 @@ print("\n-- complete / expire are idempotent --")
 local d = C.new(); d.amount = 100
 ok(d:complete() == true, "first complete returns true")
 ok(d:complete() == false, "second complete returns false")
-ok(d.completedTime == g_currentMission.time, "completedTime stamped")
+ok(d.completedTime == TransportCompanyContract.getGameDay(),
+   "completedTime stamped on the game-day clock", d.completedTime)
 local e = C.new(); e.amount = 100; e.deadline = 500
 ok(e:getIsExpired(1000) == true, "past deadline is expired")
 ok(e:expire() == true and e:expire() == false, "expire idempotent")

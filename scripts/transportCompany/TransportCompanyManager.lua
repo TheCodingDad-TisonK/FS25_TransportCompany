@@ -43,7 +43,36 @@ TransportCompanyManager.MOD_DIRECTORY = nil
 -- player gets from manually cancelling and re-hiring.
 TransportCompanyManager.STUCK_CHECK_INTERVAL_MS = 20000  -- evaluate every 20s
 TransportCompanyManager.STUCK_MIN_DISTANCE_M = 8         -- must cover at least this far
-TransportCompanyManager.STUCK_MAX_REPLAN_ATTEMPTS = 3    -- give up after this many forced replans
+-- Total recovery attempts (reverse manoeuvre or replan) before the
+-- driver is released. Not just replans any more, hence the name.
+TransportCompanyManager.STUCK_MAX_RECOVERY_ATTEMPTS = 5
+
+-- ── Unsticking a blocked driver ────────────────
+-- The base game has no recovery of its own. When the navigation agent
+-- reports AgentState.BLOCKED, AIDrivable:onUpdate calls stopAIDriving()
+-- and raises a flag for the HUD icon — and that is the whole of it
+-- (AIDrivable.lua:251-253). Nothing replans, nothing reverses, nothing
+-- times the job out, so a truck nosed into a pole stands there for the
+-- rest of the save.
+--
+-- It cannot free itself either: AIDrivable:getAIAllowsBackwards()
+-- returns false and nothing in the game overrides it, so the agent is
+-- created with reversing disabled (AIDrivable.lua:290, :431). The
+-- planner is structurally incapable of backing out. Once the nose is in
+-- and no forward path exists, that is the end of the job.
+--
+-- So we do it ourselves: notice the block from the engine's own state,
+-- pause the agent, roll the truck straight back a few metres under
+-- manual wheel control, then hand the target back so the agent replans
+-- from open road.
+-- Distance is duration x speed, less the ramp up from a standstill:
+-- 3.6s at 6 km/h is roughly 5 m of travel against 6 m of theoretical.
+-- The clearance check has to cover the theoretical figure with room to
+-- spare, or the truck reverses into ground nobody sampled.
+TransportCompanyManager.BLOCKED_GRACE_MS = 6000     -- engine trips its own flag at 5000
+TransportCompanyManager.NUDGE_DURATION_MS = 3600    -- how long to reverse for
+TransportCompanyManager.NUDGE_SPEED_KMH = 6         -- slow: a rig reversing fast jackknifes
+TransportCompanyManager.NUDGE_CLEARANCE_M = 12      -- free space needed behind before trying
 
 -- ── Return-to-HQ trip ──────────────────────────
 -- When a hired driver finishes a contract, the truck is dispatched
@@ -151,6 +180,10 @@ function TransportCompanyManager.new(modDirectory, modName)
     -- contractId -> true: this contract's return trip already retried
     -- once; a second validate failure gives up.
     self._returnRetried = {}
+    -- contractId -> reverse manoeuvre in progress. Holds the agent
+    -- target we took the truck away from, so it can be handed straight
+    -- back when the truck has room again.
+    self._activeNudges = {}
 
     -- One-per-session flags (see _ensureMissionStartup). Reset on
     -- mission teardown so a fresh career re-arms them.
@@ -386,6 +419,7 @@ function TransportCompanyManager:_onDeleteMission()
     self._lastBoardSnapshot = {}
     self._pendingReturnTrips = {}
     self._returnRetried = {}
+    self._activeNudges = {}
     self.isMissionStarted = false
     self.isMissionLoaded = false
     self._startupRan = false
@@ -393,6 +427,23 @@ function TransportCompanyManager:_onDeleteMission()
 end
 
 -- ── Settings ────────────────────────────────────
+
+---Which settings object actually owns a given setting.
+---
+---Local-only settings (debugMode) are per-player and live on the manager;
+---everything else is server-shared company state. The PDA used to hand the
+---whole Settings tab to the company's object whenever a company existed, so
+---toggling Debug Mode wrote to a copy nobody reads — TransportCompanyLog
+---asks the manager — and the change appeared to do nothing at all.
+---@param def table A TransportCompanySettings.definitions entry
+---@param company TransportCompanyCompany|nil
+---@return TransportCompanySettings
+function TransportCompanyManager:getSettingsFor(def, company)
+    if def ~= nil and def.localOnly then
+        return self.settings
+    end
+    return (company ~= nil and company.settings) or self.settings
+end
 
 ---Reload settings from disk (called from console command).
 function TransportCompanyManager:reloadSettings()
@@ -554,6 +605,27 @@ function TransportCompanyManager:_getCompanyFarmId()
     return 0
 end
 
+---Does this farm still have an HQ in the manager's own registry?
+---
+---This is the test to use while an HQ is being removed. The world scan in
+---_hasHq cannot be: Placeable:onSell raises its event with the placeable
+---STILL in placeableSystem.placeables (Placeable.lua:874), and removal only
+---happens later, inside delete() at :568 — before onDelete at :577. So on a
+---sell, _hasHq still saw the HQ being sold and reported the farm covered,
+---the company was never archived, and onDelete then found isActive already
+---false and stayed silent. The registry, by contrast, has already had the
+---entry cleared by the caller.
+---@param farmId number
+---@return boolean
+function TransportCompanyManager:_hasRegisteredHq(farmId)
+    for _, placeable in pairs(self.hqPlaceables) do
+        if placeable ~= nil and self:_getHqFarmId(placeable) == farmId then
+            return true
+        end
+    end
+    return false
+end
+
 ---Check whether the given farm has at least one HQ.
 ---Drives the PDA tab's enabling predicate, so in multiplayer it must
 ---not be satisfied by a rival farm's headquarters.
@@ -628,8 +700,10 @@ function TransportCompanyManager:onHqChanged(placeable, isActive, suppressBoard)
     else
         self.hqPlaceables[uniqueId] = nil
         TransportCompanyLog.info("HQ removed: %s (farm %s)", uniqueId, tostring(farmId))
-        -- Archive the company only when this farm has no HQ left.
-        if company ~= nil and not self:_hasHq(farmId) then
+        -- Archive the company only when this farm has no HQ left. Asked of
+        -- the registry (the entry above is already gone), never of the world
+        -- scan — see _hasRegisteredHq for why the scan lies during a sell.
+        if company ~= nil and not self:_hasRegisteredHq(farmId) then
             company:archive()
             TransportCompanyLog.info("Company archived for farm %s", tostring(farmId))
         end
@@ -724,6 +798,88 @@ function TransportCompanyManager:_regenerateContractBoard(farmId)
     end
 end
 
+---Throw one farm's board away and build a fresh one. Server only.
+---
+---Shared by the tc_reset_board console command and the PDA's Reset
+---Board button, so both take exactly the same path. Completed jobs are
+---kept: they are the ledger history, and wiping them would rewrite the
+---company's books.
+---
+---Unlike a plain table wipe this also calls off anything in flight. A
+---hired driver's AI job outlives the contract that started it, so
+---without the stop the truck would carry on hauling for a job that no
+---longer exists, and the stuck watchdog would keep polling a contract
+---id that is gone.
+---@param farmId number Farm whose board should be rebuilt
+---@return number removed How many contracts were cleared
+---@return number remaining How many the rebuilt board holds
+function TransportCompanyManager:resetBoard(farmId)
+    if not self.isServer then return 0, 0 end
+
+    local company = self:getCompany(farmId)
+    if company == nil then return 0, 0 end
+
+    local removed = 0
+    for contractId, contract in pairs(company.contracts) do
+        if contract.state ~= TransportCompanyContract.STATE_COMPLETED then
+            -- Stop the AI job while the contract is still in the table:
+            -- _onAIServerJobStopped matches jobs back to contracts by
+            -- scanning it, and it is what releases the driver cleanly.
+            if contract.isHiredDriver and (contract.hiredDriverJobId or 0) > 0
+               and g_currentMission ~= nil and g_currentMission.aiSystem ~= nil then
+                g_currentMission.aiSystem:stopJobById(
+                    contract.hiredDriverJobId, AIMessageErrorUnknown.new()
+                )
+            end
+            if company.stuckWatch ~= nil then
+                company.stuckWatch[contractId] = nil
+            end
+            -- The contract is about to leave the table the nudge loop
+            -- iterates, so nothing would ever finish the manoeuvre.
+            self:_cancelReverseNudge(contractId)
+
+            company.contracts[contractId] = nil
+            -- Clients hold their own copy of the board, so a removal has
+            -- to be broadcast or their PDA keeps listing dead jobs.
+            TransportCompanyContractEvent.sendEvent(
+                TransportCompanyContractEvent.TYPE_REMOVE, contract, nil, farmId
+            )
+            removed = removed + 1
+        end
+    end
+
+    self:_regenerateContractBoard(farmId)
+
+    local remaining = 0
+    for _ in pairs(company.contracts) do remaining = remaining + 1 end
+
+    -- The host's own PDA never receives the broadcasts above (the server
+    -- only sends them out), so refresh it here.
+    self:_refreshDispatchUI()
+
+    return removed, remaining
+end
+
+---Server-side handler for a Reset Board request from the PDA. Reached
+---directly on a listen server, via TransportCompanyResetBoardEvent
+---from a client. The farm is resolved from the sender, so a player can
+---only ever rebuild their own company's board.
+---@param farmId number
+---@return boolean applied
+function TransportCompanyManager:onResetBoardRequest(farmId)
+    if not self.isServer then return false end
+    if farmId == nil or farmId <= 0 then return false end
+
+    local company = self:getCompany(farmId)
+    if company == nil or company.isArchived then return false end
+
+    local removed, remaining = self:resetBoard(farmId)
+    self:_notify(string.format(
+        g_i18n:getText("transportCompany_resetBoardDone"), removed, remaining
+    ), farmId)
+    return true
+end
+
 -- ── Contract Persistence ──────────────────────
 
 ---Save every company's contracts and truck ledger to dedicated XML
@@ -802,6 +958,11 @@ function TransportCompanyManager:_saveCompanyToFile(company, filePath)
     -- Business-sim state (R4)
     xmlFile:setFloat("transportCompany.reputation#value", company.reputation or 0)
     xmlFile:setInt("transportCompany.hq#level", company.hqLevel or TransportCompanyCompany.HQ_BASE_LEVEL)
+    -- Payroll watermark, in game days. Persisted so saving and reloading
+    -- does not push payday out by another week every time.
+    if company.nextWageDay ~= nil then
+        xmlFile:setFloat("transportCompany.payroll#nextWageDay", company.nextWageDay)
+    end
     local histIdx = 0
     for _, period in ipairs(company.ledgerHistory or {}) do
         local key = string.format("transportCompany.history.period(%d)", histIdx)
@@ -921,6 +1082,8 @@ function TransportCompanyManager:_loadCompanyFromFile(company, filePath)
     -- Business-sim state (R4). Defaults keep pre-R4 saves working.
     company.reputation = xmlFile:getFloat("transportCompany.reputation#value", 0)
     company.hqLevel = xmlFile:getInt("transportCompany.hq#level", TransportCompanyCompany.HQ_BASE_LEVEL)
+    -- nil when absent (a pre-payroll save), which re-seeds a week out.
+    company.nextWageDay = xmlFile:getFloat("transportCompany.payroll#nextWageDay", nil)
     local histIdx = 0
     while true do
         local key = string.format("transportCompany.history.period(%d)", histIdx)
@@ -1097,11 +1260,20 @@ function TransportCompanyManager:update(dt)
                 self:_broadcastBooks(farmId)
             end
 
-            -- Pay the drivers' weekly base wages once a game week.
-            company.wageTimer = (company.wageTimer or 0) + dt
-            if company.wageTimer >= TransportCompanyContract.DAY_LENGTH * 7 then
-                company.wageTimer = 0
-                self:_payWeeklyWages(company)
+            -- Pay the drivers' weekly base wages once a game WEEK, timed on
+            -- the game-day clock rather than accumulated dt. dt is real
+            -- frame time, so the old `wageTimer >= DAY_LENGTH * 7` threshold
+            -- wanted 168 hours of continuous play and the payroll never ran
+            -- once. The loop settles every week missed across a long sleep
+            -- or a fast-forward instead of dribbling one out per frame.
+            local today = TransportCompanyContract.getGameDay()
+            if company.nextWageDay == nil then
+                company.nextWageDay = today + 7
+            else
+                while today >= company.nextWageDay do
+                    company.nextWageDay = company.nextWageDay + 7
+                    self:_payWeeklyWages(company)
+                end
             end
         end
     end
@@ -1177,7 +1349,7 @@ end
 ---@param jobs number
 ---@param km number
 function TransportCompanyManager:_rollLedgerPeriod(company, revenue, wages, jobs, km)
-    local periodIndex = math.floor(g_currentMission.time / (TransportCompanyContract.DAY_LENGTH * 7))
+    local periodIndex = math.floor(TransportCompanyContract.getGameDay() / 7)
     local history = company.ledgerHistory or {}
     local last = history[#history]
     if last == nil or last.index ~= periodIndex then
@@ -1199,7 +1371,10 @@ end
 ---companies. Called every frame; see the note in update().
 function TransportCompanyManager:_sampleDistance()
     for _, company in pairs(self.companies) do
-        if company ~= nil then
+        -- A closed or archived company keeps no books, the same gate
+        -- _checkMaintenance already applied. Without it a company switched
+        -- off still ran its odometer up and billed the fuel behind it.
+        if company ~= nil and company:getIsActive() then
             for _, truck in pairs(company.trucks) do
                 if truck.isEnrolled then
                     local vehicle = truck:getVehicle()
@@ -1216,10 +1391,21 @@ end
 function TransportCompanyManager:_sampleTrucks(dt)
     for _, company in pairs(self.companies) do
         if company ~= nil then
+            -- Same gate as _sampleDistance: a closed company burns no
+            -- diesel on the books.
+            local isActive = company:getIsActive()
             for _, truck in pairs(company.trucks) do
                 local vehicle = truck:getVehicle()
                 if vehicle ~= nil and not vehicle:getIsBeingDeleted() then
-                    truck:sampleFuel(vehicle, dt)
+                    if isActive then
+                        truck:sampleFuel(vehicle, dt)
+                    else
+                        -- Closed: charge nothing, but keep the baseline
+                        -- current. Letting it go stale would bill the whole
+                        -- tank burned while the company was shut the moment
+                        -- the player switched it back on.
+                        truck:resetFuelBaseline(vehicle)
+                    end
                 elseif truck.isEnrolled then
                     -- Truck sold or deleted: stop sampling, keep the books.
                     truck.isEnrolled = false
@@ -1239,7 +1425,7 @@ end
 ---savegame lean and lets a fresh job take the slot. Without this the
 ---board froze with the same jobs forever and then slowly emptied.
 function TransportCompanyManager:_checkDeadlines()
-    local now = g_currentMission.time
+    local now = TransportCompanyContract.getGameDay()
 
     for farmId, company in pairs(self.companies) do
         if company ~= nil and company:getIsActive() then
@@ -1433,11 +1619,6 @@ function TransportCompanyManager:onAcceptRequest(contractId, mode, farmId)
         return false
     end
 
-    -- The deadline clock starts now, not at generation time.
-    local deadlineDays = company.settings:get("contractDeadlineDays") or 7
-    contract.deadline = g_currentMission.time
-        + TransportCompanyContract.DAY_LENGTH * deadlineDays
-
     local truck = isHire and self:_findTruckForContract(company, contract, farmId) or nil
 
     if isHire then
@@ -1466,6 +1647,14 @@ function TransportCompanyManager:onAcceptRequest(contractId, mode, farmId)
         return false
     end
 
+    -- The deadline clock starts on acceptance, not at generation time, and
+    -- only once the job is definitely taken. Setting it before the checks
+    -- above meant every refused hire still reset the clock, so hammering
+    -- Hire on a job that could never be hired kept it on the board forever.
+    local previousDeadline = contract.deadline
+    local deadlineDays = company.settings:get("contractDeadlineDays") or 7
+    contract.deadline = TransportCompanyContract.getGameDay() + deadlineDays
+
     if isHire then
         local started, reason = self:_dispatchHiredDriver(company, contract, truck)
         if not started then
@@ -1475,6 +1664,8 @@ function TransportCompanyManager:onAcceptRequest(contractId, mode, farmId)
             contract.isHiredDriver = false
             contract.acceptedTruckUniqueId = ""
             contract.farmId = 0
+            contract.acceptedTime = 0
+            contract.deadline = previousDeadline
             self:_notify(reason or g_i18n:getText("transportCompany_noTruck"), farmId)
             return false
         end
@@ -1556,8 +1747,9 @@ function TransportCompanyManager:_findTruckForContract(company, contract, farmId
             -- getIsAvailableForVehicle is the engine's own suitability
             -- test (AIJobLoadAndDeliver.lua:376): AI-capable, not in
             -- use, and has both loading and discharge nodes.
-            if vehicle ~= nil and not vehicle:getIsBeingDeleted()
-               and probe:getIsAvailableForVehicle(vehicle) then
+            local isUsable = vehicle ~= nil and not vehicle:getIsBeingDeleted()
+                and probe:getIsAvailableForVehicle(vehicle)
+            if isUsable then
                 -- Prefer a truck that has a named driver assigned: that
                 -- is the truck the player staffed, so the driver's record
                 -- moves with the job. First usable truck is the fallback
@@ -1568,8 +1760,12 @@ function TransportCompanyManager:_findTruckForContract(company, contract, farmId
                 if company:getDriverForTruck(truck.uniqueId) ~= nil then
                     return truck
                 end
+            else
+                -- Only actual rejections. This used to run for every truck
+                -- considered, so the log announced the very truck that was
+                -- about to be dispatched as "rejected".
+                self:_logHireRejection(truck, vehicle)
             end
-            self:_logHireRejection(truck, vehicle)
         end
     end
 
@@ -1700,13 +1896,25 @@ end
 ---truck that is nominally driving but not making progress, and force
 ---a fresh route plan when it has been stuck too long.
 ---
----Measures net displacement (straight-line distance between the start
----and end of a window), not cumulative distance travelled. A truck
----wedged against an obstacle often revs and rocks back and forth
----trying to free itself — that can add up to several metres of actual
----wheel movement over a window while its position barely changes, and
----summing lastMovedDistance let that jitter reset the timer every
----cycle, so the watchdog never fired.
+---Two detectors run together, because they catch different failures.
+---
+---The FAST one reads the engine's own verdict. AIDrivable keeps
+---spec_aiDrivable.lastIsBlocked and lastState for us, set the moment
+---the navigation agent reports AgentState.BLOCKED (AIDrivable.lua:220,
+---:251, :275). That is the "driven into a pole or a barrier" case, and
+---acting on it means recovering in seconds rather than up to a full
+---sampling window.
+---
+---The SLOW one still measures net displacement, because the engine
+---explicitly does NOT call a stopped truck blocked when the agent
+---itself commanded zero speed (AIDrivable.lua:244-246). Yielding
+---forever to traffic that never clears looks perfectly healthy to the
+---agent, and only "it has not moved" catches it.
+---
+---Net displacement, note, not distance travelled: a truck wedged
+---against an obstacle revs and rocks in place, which adds up to metres
+---of wheel movement while the position barely changes, and summing
+---lastMovedDistance let that jitter reset the timer every cycle.
 ---@param company TransportCompanyCompany
 ---@param dt number Delta time in milliseconds
 function TransportCompanyManager:_checkStuckDrivers(company, dt)
@@ -1718,6 +1926,11 @@ function TransportCompanyManager:_checkStuckDrivers(company, dt)
 
         if not isActiveHiredDriver then
             company.stuckWatch[contractId] = nil
+            self:_cancelReverseNudge(contractId)
+        elseif self._activeNudges[contractId] ~= nil then
+            -- Mid-manoeuvre: the agent is paused and we are driving the
+            -- wheels, so neither detector applies this frame.
+            self:_updateReverseNudge(contractId, dt)
         else
             local job = g_currentMission.aiSystem:getJobById(contract.hiredDriverJobId)
             local truck = company.trucks[contract.acceptedTruckUniqueId]
@@ -1737,11 +1950,26 @@ function TransportCompanyManager:_checkStuckDrivers(company, dt)
 
                 local watch = company.stuckWatch[contractId]
                 if watch == nil then
-                    watch = { windowTimer = 0, anchorX = nil, anchorZ = nil, attempts = 0 }
+                    watch = { windowTimer = 0, anchorX = nil, anchorZ = nil, attempts = 0,
+                              blockedTimer = 0 }
                     company.stuckWatch[contractId] = watch
                 end
 
-                if isDriving then
+                -- Fast path: the agent has given up on its own.
+                if isDriving and self:_getIsAgentBlocked(vehicle) then
+                    watch.blockedTimer = (watch.blockedTimer or 0) + dt
+                    if watch.blockedTimer >= TransportCompanyManager.BLOCKED_GRACE_MS then
+                        watch.blockedTimer = 0
+                        watch.windowTimer = 0
+                        watch.anchorX, watch.anchorZ = nil, nil
+                        watch.attempts = watch.attempts + 1
+                        self:_recoverBlockedDriver(company, contract, truck, vehicle, watch.attempts)
+                    end
+                else
+                    watch.blockedTimer = 0
+                end
+
+                if isDriving and self._activeNudges[contractId] == nil then
                     local x, _, z = getWorldTranslation(vehicle.rootNode)
 
                     if watch.anchorX == nil then
@@ -1757,7 +1985,8 @@ function TransportCompanyManager:_checkStuckDrivers(company, dt)
 
                             if netDistance < TransportCompanyManager.STUCK_MIN_DISTANCE_M then
                                 watch.attempts = watch.attempts + 1
-                                self:_replanStuckDriver(company, contract, truck, watch.attempts)
+                                self:_recoverBlockedDriver(
+                                    company, contract, truck, vehicle, watch.attempts)
                             else
                                 watch.attempts = 0
                             end
@@ -1778,6 +2007,224 @@ function TransportCompanyManager:_checkStuckDrivers(company, dt)
                 end
             end
         end
+    end
+end
+
+---Is the engine's navigation agent reporting this vehicle blocked?
+---
+---AIDrivable maintains both fields on the server every frame while a
+---job runs: lastState is the raw agent status and lastIsBlocked is the
+---debounced flag the HUD warning icon uses (AIDrivable.lua:220, :275).
+---Reading them beats inferring a stall from position, because it also
+---tells us the agent has stopped trying rather than merely crawling.
+---@param vehicle table
+---@return boolean
+function TransportCompanyManager:_getIsAgentBlocked(vehicle)
+    local spec = vehicle ~= nil and vehicle.spec_aiDrivable or nil
+    if spec == nil or not spec.isRunning then
+        return false
+    end
+    if spec.lastIsBlocked then
+        return true
+    end
+    return AgentState ~= nil and spec.lastState == AgentState.BLOCKED
+end
+
+---Decide what to do about a driver that has stopped making progress.
+---
+---A reverse first, because it is the only manoeuvre that actually
+---resolves the common case: the agent cannot plan its way out of a
+---spot it can only leave backwards, so no amount of replanning from
+---the same position will help. Replanning is the fallback for when
+---there is no room to back into, and it is what fixes the other case —
+---a route that has become impassable further along.
+---@param company TransportCompanyCompany
+---@param contract TransportCompanyContract
+---@param truck TransportCompanyTruck|nil
+---@param vehicle table|nil
+---@param attempt number How many recoveries this contract has now had
+function TransportCompanyManager:_recoverBlockedDriver(company, contract, truck, vehicle, attempt)
+    if attempt > TransportCompanyManager.STUCK_MAX_RECOVERY_ATTEMPTS then
+        self:_replanStuckDriver(company, contract, truck, attempt)
+        return
+    end
+
+    if vehicle ~= nil and self:_startReverseNudge(company, contract, vehicle) then
+        TransportCompanyLog.info(
+            "Hired driver for contract %s is blocked (attempt %d) — reversing to free it",
+            tostring(contract.contractId), attempt
+        )
+        return
+    end
+
+    self:_replanStuckDriver(company, contract, truck, attempt)
+end
+
+---Is there room behind the truck to reverse into?
+---
+---Samples the navigation map's own cost field at a few points straight
+---back along the vehicle's axis, which is the same data the planner
+---refuses to route through (AIDrivable.lua:554 uses it for its space
+---test). Backing blindly into whatever is behind would trade a truck
+---stuck against a pole for a truck stuck in a ditch.
+---@param vehicle table
+---@return boolean
+function TransportCompanyManager:_hasSpaceBehind(vehicle)
+    if g_currentMission == nil or g_currentMission.aiSystem == nil then
+        return false
+    end
+    local navMap = g_currentMission.aiSystem.navigationMap
+    if navMap == nil or getVehicleNavigationMapCostAtWorldPos == nil then
+        -- No map to consult: refuse rather than reverse on a guess.
+        return false
+    end
+
+    local node = vehicle.rootNode
+    if node == nil then return false end
+
+    -- Step back in 2 m increments so a short obstruction close behind is
+    -- caught as well as one at the far end of the manoeuvre.
+    for distance = 2, TransportCompanyManager.NUDGE_CLEARANCE_M, 2 do
+        local x, y, z = localToWorld(node, 0, 0, -distance)
+        local ok, cost, isBlocking = pcall(getVehicleNavigationMapCostAtWorldPos, navMap, x, y, z)
+        if not ok then return false end
+        -- BOTH halves of the engine's own verdict. AISystem:getIsPositionReachable
+        -- returns `costs ~= 255 and not isBlocking` (AISystem.lua:413-423) —
+        -- reading only the blocking flag accepted impassable cells and
+        -- reversed the truck into them.
+        if isBlocking or cost == 255 then return false end
+    end
+    return true
+end
+
+---Take the truck off the agent and roll it straight back.
+---
+---The agent is paused rather than unset: unsetAITarget would nil the
+---task and raise onAIDriveableEnd, which switches the truck's lights
+---and beacons off (Lights.lua:1009) — a visible flicker every time a
+---driver gets nipped by a bollard. Clearing isRunning skips AIDrivable's
+---update block entirely, so it stops braking against us, and the target
+---snapshot lets _finishReverseNudge hand the job straight back.
+---@return boolean started
+function TransportCompanyManager:_startReverseNudge(company, contract, vehicle)
+    local spec = vehicle.spec_aiDrivable
+    if spec == nil or not spec.isRunning or spec.task == nil then
+        return false
+    end
+    if vehicle.getMotor == nil or vehicle:getMotor() == nil then
+        return false
+    end
+    if not self:_hasSpaceBehind(vehicle) then
+        TransportCompanyLog.debug(
+            "unstick: no room behind contract %s, replanning instead",
+            tostring(contract.contractId)
+        )
+        return false
+    end
+
+    self._activeNudges[contract.contractId] = {
+        company  = company,
+        contract = contract,
+        vehicle  = vehicle,
+        timer    = TransportCompanyManager.NUDGE_DURATION_MS,
+        task     = spec.task,
+        targetX  = spec.targetX,
+        targetY  = spec.targetY,
+        targetZ  = spec.targetZ,
+        dirX     = spec.targetDirX,
+        dirY     = spec.targetDirY,
+        dirZ     = spec.targetDirZ,
+        maxSpeed = spec.maxSpeed,
+        manual   = spec.useManualDriving,
+    }
+
+    spec.isRunning = false
+    -- Straight wheels: a rig reversing on lock jackknifes, and all we
+    -- want is to give the planner a metre or two of room.
+    vehicle.rotatedTime = 0
+    return true
+end
+
+---Drive one frame of the reverse. Negative acceleration is how the
+---player's own reverse works too — Drivable feeds its input axis
+---straight through to the same call (Drivable.lua:879).
+function TransportCompanyManager:_updateReverseNudge(contractId, dt)
+    local nudge = self._activeNudges[contractId]
+    if nudge == nil then return end
+
+    local vehicle = nudge.vehicle
+    if vehicle == nil or vehicle.rootNode == nil or vehicle.spec_aiDrivable == nil
+       or vehicle:getIsBeingDeleted() then
+        self:_cancelReverseNudge(contractId)
+        return
+    end
+
+    nudge.timer = nudge.timer - dt
+    if nudge.timer <= 0 then
+        self:_finishReverseNudge(contractId)
+        return
+    end
+
+    local ok = pcall(function()
+        vehicle:getMotor():setSpeedLimit(TransportCompanyManager.NUDGE_SPEED_KMH)
+        if vehicle:getCruiseControlState() ~= Drivable.CRUISECONTROL_STATE_OFF then
+            vehicle:setCruiseControlState(Drivable.CRUISECONTROL_STATE_OFF, true)
+        end
+        WheelsUtil.updateWheelsPhysics(
+            vehicle, dt, vehicle.lastSpeedReal * vehicle.movingDirection,
+            -1, false, true
+        )
+    end)
+    if not ok then
+        self:_cancelReverseNudge(contractId)
+    end
+end
+
+---Hand the truck back to the agent from wherever it ended up.
+---
+---setAITarget re-issues setVehicleNavigationAgentTarget, so the agent
+---plans afresh from the new position — which is the whole point of
+---having moved.
+function TransportCompanyManager:_finishReverseNudge(contractId)
+    local nudge = self._activeNudges[contractId]
+    self._activeNudges[contractId] = nil
+    if nudge == nil then return end
+
+    local vehicle = nudge.vehicle
+    if vehicle == nil or vehicle.spec_aiDrivable == nil then return end
+
+    pcall(function()
+        vehicle:brake(1)
+        vehicle:stopVehicle()
+        if nudge.targetX ~= nil then
+            vehicle:setAITarget(
+                nudge.task, nudge.targetX, nudge.targetY, nudge.targetZ,
+                nudge.dirX, nudge.dirY, nudge.dirZ, nudge.maxSpeed, nudge.manual
+            )
+        else
+            vehicle.spec_aiDrivable.isRunning = true
+        end
+    end)
+
+    TransportCompanyLog.debug(
+        "unstick: contract %s handed back to the agent after reversing",
+        tostring(contractId)
+    )
+end
+
+---Abandon a manoeuvre without resuming — the job or truck went away
+---underneath it. Leaves the agent paused only if it still exists.
+function TransportCompanyManager:_cancelReverseNudge(contractId)
+    local nudge = self._activeNudges[contractId]
+    if nudge == nil then return end
+    self._activeNudges[contractId] = nil
+
+    local vehicle = nudge.vehicle
+    if vehicle ~= nil and vehicle.spec_aiDrivable ~= nil then
+        pcall(function()
+            vehicle:brake(1)
+            vehicle:stopVehicle()
+        end)
     end
 end
 
@@ -1810,13 +2257,22 @@ function TransportCompanyManager:_replanStuckDriver(company, contract, truck, at
         contract.hiredDriverJobId = 0
     end
 
-    if attempt > TransportCompanyManager.STUCK_MAX_REPLAN_ATTEMPTS then
+    if attempt > TransportCompanyManager.STUCK_MAX_RECOVERY_ATTEMPTS then
         TransportCompanyLog.info(
             "Contract %s exceeded max replan attempts — releasing the driver",
             tostring(contract.contractId)
         )
+        -- Send the truck home before letting the driver go. A short
+        -- route back to the HQ often plans fine from a spot the onward
+        -- haul cannot be planned from, so the player gets the truck
+        -- back instead of finding it abandoned on a verge. Queued while
+        -- isHiredDriver is still set, because that is what the queue
+        -- gates on, and it honours the returnTruckToHq setting.
+        self:_queueReturnToHq(company, contract)
+
         contract.isHiredDriver = false
         company.stuckWatch[contract.contractId] = nil
+        self:_cancelReverseNudge(contract.contractId)
         TransportCompanyContractEvent.sendEvent(
             TransportCompanyContractEvent.TYPE_UPDATE, contract, nil, farmId
         )
@@ -1846,14 +2302,35 @@ end
 ---SellingStation overrides the method and only sometimes calls its
 ---super (SellingStation.lua:305-327), so both classes are hooked and a
 ---depth counter keeps the inner super call from crediting twice.
+---
+---The depth MUST be taken before superFunc runs. A production point owned
+---by the player is a SellingStation whose getStoreGoods returns true
+---(ProductionPoint.lua:242-247), which sends addFillLevelFromTool down the
+---super call at SellingStation.lua:327 — straight into this same hook. With
+---the counter incremented after superFunc returned, the nested call saw
+---depth 0, credited, returned, and then the outer call saw depth 0 and
+---credited the identical liters again: every delivery to your own dairy or
+---mill counted double and completed contracts on half the load.
 function TransportCompanyManager:_installDeliveryHooks()
     local function makeHook(className)
         return function(station, superFunc, farmId, deltaFillLevel, fillType, fillInfo, toolType, extraAttributes)
-            local moved = superFunc(station, farmId, deltaFillLevel, fillType, fillInfo, toolType, extraAttributes)
             local mgr = g_transportCompanyManager
+            local isOutermost = false
             if mgr ~= nil then
                 mgr._deliveryDepth = (mgr._deliveryDepth or 0) + 1
-                if mgr._deliveryDepth == 1 and moved ~= nil and moved > 0 then
+                isOutermost = mgr._deliveryDepth == 1
+            end
+
+            -- Wrapped only so the depth can unwind on the way out: an error
+            -- escaping here with the counter still raised would make every
+            -- later delivery look nested and silently credit nothing. The
+            -- error itself is re-raised below, unchanged.
+            local okSuper, moved = pcall(
+                superFunc, station, farmId, deltaFillLevel, fillType, fillInfo, toolType, extraAttributes
+            )
+
+            if mgr ~= nil then
+                if okSuper and isOutermost and moved ~= nil and moved > 0 then
                     local ok, err = pcall(
                         mgr.onGoodsDelivered, mgr, station, farmId, moved, fillType
                     )
@@ -1864,6 +2341,13 @@ function TransportCompanyManager:_installDeliveryHooks()
                     end
                 end
                 mgr._deliveryDepth = mgr._deliveryDepth - 1
+            end
+
+            if not okSuper then
+                -- Re-raise with the depth already unwound, so one throwing
+                -- delivery does not wedge the counter and mute every credit
+                -- for the rest of the session.
+                error(moved, 0)
             end
             return moved
         end
@@ -2034,9 +2518,12 @@ function TransportCompanyManager:_completeContract(company, contract)
     company.ledger.driverWages = company.ledger.driverWages + driverCut
     company.ledger.jobs = company.ledger.jobs + 1
 
-    -- P&L rollup for the Ledger tab's weekly history.
+    -- P&L rollup for the Ledger tab's weekly history. The distance booked
+    -- is THIS job's route in km, not the truck's lifetime odometer: passing
+    -- the odometer re-added the entire running total on every completion,
+    -- so the weekly figure grew quadratically and meant nothing.
     self:_rollLedgerPeriod(company, companyRevenue, driverCut, 1,
-        truck ~= nil and truck.distanceM or 0)
+        (contract.routeDistanceM or 0) / 1000)
 
     -- Reputation: an on-time delivery builds the company. Urgent jobs
     -- earn a touch more; bulk a touch less, matching the reward curve.
@@ -2272,6 +2759,10 @@ function TransportCompanyManager:_dispatchReturnToHq(company, contract)
                     contract = contract,
                     timer = TransportCompanyManager.RETURN_RETRY_DELAY_MS,
                 })
+            else
+                -- Out of retries: drop the marker so the table does not
+                -- accumulate an entry per contract for the whole session.
+                self._returnRetried[contract.contractId] = nil
             end
             TransportCompanyLog.debug(
                 "return-to-HQ validate failed for %s: %s",
@@ -2280,6 +2771,7 @@ function TransportCompanyManager:_dispatchReturnToHq(company, contract)
             return false
         end
 
+        self._returnRetried[contract.contractId] = nil
         g_currentMission.aiSystem:startJob(job, company.farmId)
         TransportCompanyLog.info(
             "Truck %s returning to HQ (farm %s)",
@@ -2329,7 +2821,14 @@ function TransportCompanyManager:_getHqParkingTarget(farmId)
                 for _, axis in ipairs(worldAxes) do
                     local px = hx + axis[1] * distance
                     local pz = hz + axis[2] * distance
-                    if g_currentMission.aiSystem:getIsPositionReachable(px, 0, pz) then
+                    -- Sample the terrain for Y. The nav-map lookup behind
+                    -- getIsPositionReachable is a 3D world-position query and
+                    -- every base-game caller feeds it
+                    -- getTerrainHeightAtWorldPos (AISystem.lua:452, :777);
+                    -- a hardcoded 0 asks about a point under the map on any
+                    -- terrain that is not at sea level.
+                    local py = getTerrainHeightAtWorldPos(g_terrainNode, px, 0, pz)
+                    if g_currentMission.aiSystem:getIsPositionReachable(px, py, pz) then
                         return px, pz
                     end
                 end
@@ -2391,7 +2890,14 @@ function TransportCompanyManager:_broadcastBooks(farmId)
 
     local company = self:getCompany(farmId)
     if company == nil then return end
-    if next(company.trucks) == nil and company.ledger.jobs == 0 then
+    -- Skip only a company with genuinely nothing to report. Drivers count:
+    -- gating on trucks-and-jobs alone meant a farm that had just hired its
+    -- first driver pushed no snapshot, so the Drivers tab stayed empty on
+    -- every client until the first delivery landed.
+    if next(company.trucks) == nil and next(company.drivers) == nil
+       and company.ledger.jobs == 0 and (company.reputation or 0) == 0
+       and (company.hqLevel or TransportCompanyCompany.HQ_BASE_LEVEL)
+           <= TransportCompanyCompany.HQ_BASE_LEVEL then
         return
     end
 
@@ -2533,6 +3039,12 @@ function TransportCompanyManager:onContractEvent(eventType, contract, state, far
         company.contracts[contract.contractId] = contract
     elseif eventType == TransportCompanyContractEvent.TYPE_STATE_CHANGE then
         contract.state = state
+        -- Store it, like every other event type does. `contract` here is a
+        -- fresh object built by readStream, so setting its state and
+        -- dropping it left the client's own copy stuck on ACCEPTED: on a
+        -- dedicated server, delivered and expired jobs sat on the Dispatch
+        -- board forever and never reached the Ledger.
+        company.contracts[contract.contractId] = contract
         if state == TransportCompanyContract.STATE_COMPLETED then
             self:_cleanupCompletedContracts(company)
         end
@@ -2547,8 +3059,8 @@ end
 ---7 days to keep the savegame XML lean.
 ---@param company TransportCompanyCompany
 function TransportCompanyManager:_cleanupCompletedContracts(company)
-    local now = g_currentMission.time
-    local maxAge = TransportCompanyContract.DAY_LENGTH * 7
+    local now = TransportCompanyContract.getGameDay()
+    local maxAge = 7   -- game days; completedTime is on the same clock
 
     for contractId, contract in pairs(company.contracts) do
         if contract.state == TransportCompanyContract.STATE_COMPLETED or
@@ -2794,7 +3306,7 @@ end
 ---Throw the whole board away and build a fresh one. Useful after a
 ---generation change, when a save still holds contracts the current
 ---rules would never have produced. Operates on the calling farm's
----company.
+---company. The PDA's Reset Board button runs the same resetBoard().
 function TransportCompanyManager:consoleCommandResetBoard()
     if not self.isServer then
         print("TransportCompany: only the server can reset the board")
@@ -2802,27 +3314,15 @@ function TransportCompanyManager:consoleCommandResetBoard()
     end
 
     local farmId = self:_getCompanyFarmId()
-    local company = self:getCompany(farmId)
-    if company == nil then
+    if self:getCompany(farmId) == nil then
         print("TransportCompany: no company (place an HQ first)")
         return
     end
 
-    local removed = 0
-    for id, contract in pairs(company.contracts) do
-        if contract.state ~= TransportCompanyContract.STATE_COMPLETED then
-            company.contracts[id] = nil
-            removed = removed + 1
-        end
-    end
-
-    self:_regenerateContractBoard(farmId)
-
-    local now = 0
-    for _ in pairs(company.contracts) do now = now + 1 end
+    local removed, remaining = self:resetBoard(farmId)
     print(string.format(
         "TransportCompany: cleared %d contract(s), board now holds %d",
-        removed, now))
+        removed, remaining))
 end
 
 function TransportCompanyManager:consoleCommandResetSettings()
@@ -2884,10 +3384,17 @@ function TransportCompanyManager:_registerHints()
             true
         )
 
+        -- Initially active, like the dispatch hint above. registerHint's
+        -- third argument means "visible from the start", not "already
+        -- dismissed": it sets alreadyShown and pushes the text into
+        -- shownHints, which is the list the Hints page renders
+        -- (IntroductionHelpSystem.lua:39-49, :272). Registered with false a
+        -- hint stays hidden until something calls showHint() for it, and
+        -- nothing here ever did — so this one was simply never reachable.
         g_currentMission.introductionHelpSystem:registerHint(
             "transportCompany_fleet",
             g_i18n:getText("transportCompany_hint_fleet"),
-            false
+            true
         )
 
         TransportCompanyLog.info("Intro hints registered")

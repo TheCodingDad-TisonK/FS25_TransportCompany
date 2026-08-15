@@ -23,6 +23,7 @@ TransportCompanyLog = { info=function() end, debug=function() end,
 local booked = {}
 g_currentMission = {
   time = 5000,
+  environment = { currentMonotonicDay = 10, dayTime = 0 },
   hud = {},
   addMoney = function(_, amount, farmId, moneyType)
     assert(farmId ~= 0, "addMoney called with farmId 0")
@@ -43,6 +44,11 @@ g_fillTypeManager = {
         return { isPalletType = false, hudOverlayFilename = "hud_wheat.png" }
     end,
 }
+
+-- Terrain height probe used when asking the AI whether a parking spot is
+-- reachable (every base-game nav query feeds it a real Y, AISystem.lua:452).
+g_terrainNode = 0
+function getTerrainHeightAtWorldPos(_, _, _, _) return 0 end
 
 dofile(ROOT .. "/scripts/transportCompany/TransportCompanyContract.lua")
 dofile(ROOT .. "/scripts/transportCompany/TransportCompanyTruck.lua")

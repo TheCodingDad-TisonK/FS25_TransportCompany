@@ -69,9 +69,10 @@ TransportCompanySettings.definitions = {
         default = 7,
         min = 1,
         max = 30,
-        -- Deadline for accepted contracts, in game days. The in-game
-        -- clock (g_currentMission.time, 86400000 ms per day) drives
-        -- the deadline; the base game mission timers show the countdown.
+        -- Deadline for accepted contracts, in game days. Driven by the
+        -- environment's day counter (TransportCompanyContract.getGameDay),
+        -- so it honours the player's day-length setting. It is explicitly
+        -- NOT g_currentMission.time, which counts real playtime.
     },
     {
         id = "hiredDriverRewardShare",
@@ -316,7 +317,16 @@ function TransportCompanySettings:save()
 end
 
 --- Save local-only settings (per-player profile).
+---
+--- Only the manager-level instance (the one with no farmId) owns this file.
+--- Every company carries a full copy of the schema, including debugMode, but
+--- never receives local-only edits — so letting a company write here rebuilt
+--- the shared local.xml from a stale copy and silently reverted the player's
+--- debug toggle the next time any company setting was saved.
 function TransportCompanySettings:saveLocalSettings()
+    if self.farmId ~= nil then
+        return false
+    end
     local path = self:getLocalSettingsPath()
     if path == nil then
         return false

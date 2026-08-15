@@ -127,6 +127,16 @@ function InGameMenuTransportCompanyFrame:initialize()
             self:onButtonHelp()
         end
     }
+    -- MENU_CANCEL is the only footer action TabbedMenu supports that the
+    -- Dispatch tab does not already spend (TabbedMenu.lua:6-11 lists all
+    -- six); it sits on backspace, well away from Accept and Hire.
+    self.resetBoardButtonInfo = {
+        inputAction = InputAction.MENU_CANCEL,
+        text = g_i18n:getText("transportCompany_resetBoard"),
+        callback = function()
+            self:onButtonResetBoard()
+        end
+    }
 
     -- Sub-category selector (Dispatch / Fleet / Ledger tabs)
     self.subCategorySelector = self:getDescendantById("subCategorySelector")
@@ -330,6 +340,14 @@ function InGameMenuTransportCompanyFrame:_updateMenuButtons()
                 table.insert(buttons, self.hireButtonInfo)
             end
         end
+
+        -- Rebuilding the board only means anything on the board itself,
+        -- and only for a farm that actually has a company to rebuild.
+        -- Saves the player dropping to the console for tc_reset_board.
+        if self.currentTab == InGameMenuTransportCompanyFrame.TAB_DISPATCH
+           and self._company ~= nil and self._company:getIsActive() then
+            table.insert(buttons, self.resetBoardButtonInfo)
+        end
     end
 
     -- Help is available on every tab: a guide to how the company works,
@@ -485,8 +503,10 @@ end
 ---read from this company's server-shared settings, except debugMode
 ---which is a global per-player setting on the manager.
 function InGameMenuTransportCompanyFrame:_buildSettingsRows(manager, company)
-    local settings = company ~= nil and company.settings or manager.settings
     for _, def in ipairs(TransportCompanySettings.definitions) do
+        -- Resolved per setting, not once for the tab: local-only settings
+        -- belong to the manager even when a company exists.
+        local settings = manager:getSettingsFor(def, company)
         table.insert(self.rows, {
             cellName = "row",
             setting  = def,
@@ -590,6 +610,32 @@ function InGameMenuTransportCompanyFrame:onButtonUpgradeHq()
         TransportCompanyDriverEvent.ACTION_UPGRADE,
         g_currentMission:getFarmId(), nil, nil
     )
+    self:updateTabContent()
+end
+
+---Clear the dispatch board and generate a fresh one.
+---
+---Confirmed first: this also drops jobs already accepted, including
+---anything a hired driver is part way through, and a footer button is
+---far easier to hit by accident than a typed console command.
+function InGameMenuTransportCompanyFrame:onButtonResetBoard()
+    YesNoDialog.show(
+        self.onResetBoardConfirmed, self,
+        g_i18n:getText("transportCompany_resetBoardConfirm"),
+        g_i18n:getText("transportCompany_resetBoard")
+    )
+end
+
+function InGameMenuTransportCompanyFrame:onResetBoardConfirmed(yes)
+    if not yes then return end
+
+    TransportCompanyResetBoardEvent.sendEvent(g_currentMission:getFarmId())
+
+    -- Every row the selection pointed at is gone, so start from the top
+    -- of the new board. On a listen server the rebuild already ran
+    -- synchronously and this redraws it; on a client the contract
+    -- broadcasts arrive moments later and refresh the page again.
+    self.resetSelection = true
     self:updateTabContent()
 end
 
@@ -732,10 +778,12 @@ function InGameMenuTransportCompanyFrame:_buildContractDetail(contract)
     end
     self:_addDetail("transportCompany_contractStatus", g_i18n:getText(stateKey))
 
+    -- getTimeLeft already returns game DAYS (see TransportCompanyContract
+    -- .getGameDay); it used to return milliseconds and needed dividing.
     local timeLeft = contract:getTimeLeft()
     if timeLeft ~= nil then
-        self:_addDetail("transportCompany_contractDeadline", string.format("%.1f d",
-            math.max(0, timeLeft / TransportCompanyContract.DAY_LENGTH)))
+        self:_addDetail("transportCompany_contractDeadline",
+            string.format("%.1f d", math.max(0, timeLeft)))
     end
 
     if contract.state == TransportCompanyContract.STATE_ACCEPTED then
@@ -846,7 +894,7 @@ function InGameMenuTransportCompanyFrame:_buildSettingDetail(def)
     local manager = TransportCompanyManager.getInstance()
     if manager == nil then return false end
 
-    local settings = self._company ~= nil and self._company.settings or manager.settings
+    local settings = manager:getSettingsFor(def, self._company)
 
     if self.detailTitle ~= nil then
         self.detailTitle:setText(
@@ -924,7 +972,7 @@ function InGameMenuTransportCompanyFrame:_applySettingChange(fn)
         return
     end
 
-    local settings = self._company ~= nil and self._company.settings or manager.settings
+    local settings = manager:getSettingsFor(def, self._company)
 
     if not TransportCompanySettings.getIsEditable(def) then
         manager:_notify(g_i18n:getText("transportCompany_settingReadOnly"))
@@ -965,8 +1013,8 @@ function InGameMenuTransportCompanyFrame:_buildTruckDetail(truck)
     self:_addDetail("transportCompany_fleetJobs", tostring(truck.jobsDelivered))
 
     -- Maintenance: how far until the next service.
-    if truck.nextServiceKm ~= nil then
-        local remaining = math.max(0, truck.nextServiceKm - (truck.distanceM or 0))
+    if truck.nextServiceM ~= nil then
+        local remaining = math.max(0, truck.nextServiceM - (truck.distanceM or 0))
         self:_addDetail("transportCompany_truckNextService",
             g_i18n:formatDistance(remaining, 1))
     end

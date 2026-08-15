@@ -167,6 +167,7 @@ local dairyD = makeUnloadingStation(placeableD, "Dairy",
 
 g_currentMission = {
     time = 1000000,
+    environment = { currentMonotonicDay = 10, dayTime = 0 },
     storageSystem = {
         loadingStations = { [siloA] = true, [elevatorB] = true },
         unloadingStations = { [sellC] = true, [dairyD] = true },
@@ -195,6 +196,11 @@ g_currentMission = {
     },
     vehicleSystem = { vehicles = {} },
 }
+
+-- Terrain height probe used when asking the AI whether a parking spot is
+-- reachable (every base-game nav query feeds it a real Y, AISystem.lua:452).
+g_terrainNode = 0
+function getTerrainHeightAtWorldPos(_, _, _, _) return 0 end
 
 dofile(ROOT .. "/scripts/transportCompany/TransportCompanyContract.lua")
 local C = TransportCompanyContract
@@ -230,7 +236,8 @@ else
     ok(c.state == C.STATE_AVAILABLE, "generated contracts are AVAILABLE")
     ok(c.generatorVersion == C.GENERATOR_VERSION, "generator version stamped")
     -- Deadline: 7 days, or ~3.5 days for an urgent job (never below 1 day).
-    local days = (c.deadline - 1000000) / 86400000
+    -- deadline is now an absolute game DAY, so days left is a subtraction
+    local days = c.deadline - C.getGameDay()
     if c.tier == C.CONTRACT_TIER_URGENT then
         ok(days >= 3.4 and days <= 4.0, "urgent deadline is ~half", days)
     else
@@ -338,31 +345,52 @@ end
 ok(capOk, "amount capped by available stock")
 
 print("\n-- capacity-aware sizing --")
--- A farm whose biggest rig holds 14000 L must never get a bulk job
--- needing more than 14000 * MAX_TRIPS_PER_JOB.
+-- A farm whose biggest rig holds RIG_L must never get a job needing more
+-- than RIG_L * MAX_TRIPS_PER_JOB.
+--
+-- The rig is deliberately small enough that the cap BINDS on every roll
+-- (math.random(8000, 24000) is always above it). With the old 14000 L rig
+-- the cap sat at 42000, no roll ever came near it, and the suite could not
+-- see that the tier multiplier was applied AFTER the cap rather than before
+-- -- which is how bulk-tier jobs shipped at 1.5x the cap, 4.5 trips, and
+-- more than the source silo held.
+local RIG_L = 3000
 local capVeh = {
     spec_motorized = { statsType = "truck" },
     getOwnerFarmId = function() return 1 end,
     getIsBeingDeleted = function() return false end,
     getAIFillUnits = function()
-        return { { capacity = 14000 } }
+        return { { capacity = RIG_L } }
     end,
     getChildVehicles = function() return {} end,
 }
 g_currentMission.vehicleSystem.vehicles = { capVeh }
-local sizedOk = true
-for i = 1, 40 do
+local maxAsk = RIG_L * C.MAX_TRIPS_PER_JOB
+local sizedOk, sawBulkTier, worst = true, false, 0
+for i = 1, 200 do
     local g = C.generate(7, 1)
     if g ~= nil and g.contractType == C.CONTRACT_TYPE_BULK then
-        local maxAsk = 14000 * C.MAX_TRIPS_PER_JOB
-        if g.amount > maxAsk then
-            sizedOk = false
-            print("  FAIL amount " .. g.amount .. " exceeds " .. maxAsk)
-        end
+        if g.tier == C.CONTRACT_TIER_BULK then sawBulkTier = true end
+        if g.amount > worst then worst = g.amount end
+        if g.amount > maxAsk then sizedOk = false end
     end
 end
-ok(sizedOk, "bulk amount capped at 3 trips of the biggest rig")
+ok(sizedOk, "bulk amount capped at 3 trips of the biggest rig", worst)
+ok(sawBulkTier, "the 200 rolls actually covered the BULK tier")
 g_currentMission.vehicleSystem.vehicles = {}
+
+print("\n-- AI capacity counts the root vehicle once --")
+-- getChildVehicles() already includes the root (Vehicle:addChildVehicles
+-- inserts self, Vehicle.lua:2152-2154), so adding the root on top of the
+-- loop double-counted a rigid truck's own bed and oversized every contract.
+local rigid = { getAIFillUnits = function() return { { capacity = 3000 } } end }
+local trailer = { getAIFillUnits = function() return { { capacity = 15000 } } end }
+rigid.getChildVehicles = function() return { rigid, trailer } end
+ok(C.getVehicleAiCapacity(rigid) == 18000,
+   "root + trailer counted once each", C.getVehicleAiCapacity(rigid))
+local solo = { getAIFillUnits = function() return { { capacity = 4000 } } end }
+ok(C.getVehicleAiCapacity(solo) == 4000,
+   "a vehicle with no child list still counts", C.getVehicleAiCapacity(solo))
 
 print("\n-- farm access gates the source --")
 -- A station the farm cannot access must report zero stock and never
