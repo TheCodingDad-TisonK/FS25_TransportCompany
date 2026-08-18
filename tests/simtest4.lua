@@ -25,7 +25,7 @@ end
 g_currentModName = "FS25_TransportCompany"
 FillType = { UNKNOWN = 0, DIESEL = 1, WHEAT = 2 }
 MoneyType = { MISSIONS = "m", AI = "ai" }
-InputAction = { MENU_BACK = 1, MENU_ACTIVATE = 2, MENU_EXTRA_1 = 3 }
+InputAction = { MENU_BACK = 1, MENU_ACTIVATE = 2, MENU_EXTRA_1 = 3, MENU_ACCEPT = 7 }
 g_currentMission = { time = 5000, getFarmId = function() return 1 end,
     environment = { currentMonotonicDay = 10, dayTime = 0 } }
 g_i18n = {
@@ -197,6 +197,35 @@ for _, tab in ipairs({ 2, 3, 1 }) do
     ok(okTab, "switch to tab " .. tab, errTab)
 end
 ok(frame.currentTab == 1, "ends on dispatch")
+
+print("\n-- contract type toggle --")
+-- Two contracts, one of each type. Only the filtered type shows.
+local palletC = TransportCompanyContract.new()
+palletC.contractId, palletC.amount, palletC.litersPerUnit = "p1", 4, TransportCompanyContract.LITERS_PER_PALLET
+palletC.contractType = TransportCompanyContract.CONTRACT_TYPE_PALLET
+palletC.fillTypeIndex, palletC.sourceName, palletC.destName = FillType.WHEAT, "Silo", "Dairy"
+palletC.reward = 400
+comp.contracts["p1"] = palletC
+
+frame:setTab(InGameMenuTransportCompanyFrame.TAB_DISPATCH)
+frame.toggleTypeButtonInfo = { inputAction = InputAction.MENU_ACCEPT }
+frame:onButtonToggleType()  -- bulk -> pallet
+local shownPallet = frame.rows[1] ~= nil and frame.rows[1].contract == palletC
+ok(shownPallet, "toggle to pallet filters out bulk", #frame.rows)
+ok(#frame.rows == 1, "exactly the pallet contract remains", #frame.rows)
+frame:onButtonToggleType()  -- pallet -> bulk
+ok(#frame.rows == 1 and frame.rows[1].contract == c,
+   "toggle back to bulk shows the bulk contract", #frame.rows)
+-- A third open contract of the filtered type is included, so the filter
+-- counts every open job and not just the first.
+local bulk2 = TransportCompanyContract.new()
+bulk2.contractId, bulk2.amount, bulk2.litersPerUnit = "b2", 2000, 1
+bulk2.fillTypeIndex, bulk2.sourceName, bulk2.destName = FillType.WHEAT, "Silo", "Mill"
+bulk2.reward = 600
+comp.contracts["b2"] = bulk2
+frame:onButtonToggleType()  -- bulk -> pallet (then back below)
+frame:onButtonToggleType()  -- pallet -> bulk
+ok(#frame.rows == 2, "both bulk contracts listed", #frame.rows)
 
 print("")
 print("-- scroll affordances only on scrollable tabs --")
