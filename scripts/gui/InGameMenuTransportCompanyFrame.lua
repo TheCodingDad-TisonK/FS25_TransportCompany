@@ -56,6 +56,11 @@ function InGameMenuTransportCompanyFrame.new(target, custom_mt)
     self.detailRows = {}
     self.isOpen = false
 
+    -- Which contract type the Dispatch tab shows. Two-state by design:
+    -- the board either lists bulk freight or pallet freight, never both
+    -- at once, so the type toggle is discoverable from the footer.
+    self.contractTypeFilter = TransportCompanyContract.CONTRACT_TYPE_BULK
+
     return self
 end
 
@@ -125,6 +130,19 @@ function InGameMenuTransportCompanyFrame:initialize()
         text = g_i18n:getText("transportCompany_help"),
         callback = function()
             self:onButtonHelp()
+        end
+    }
+    -- Dispatch tab only: flip the board between bulk freight and pallet
+    -- freight. Two-state toggle, so the button label names whichever
+    -- type is currently shown and pressing it swaps to the other.
+    -- MENU_ACCEPT is the one footer action the Dispatch tab does not
+    -- spend (TabbedMenu.DEFAULT_BUTTON_ACTIONS lists all six), so this
+    -- cannot collide with Accept (MENU_ACTIVATE) or Hire (MENU_EXTRA_1).
+    self.toggleTypeButtonInfo = {
+        inputAction = InputAction.MENU_ACCEPT,
+        text = g_i18n:getText("transportCompany_contractTypeBulk"),
+        callback = function()
+            self:onButtonToggleType()
         end
     }
     -- MENU_CANCEL is the only footer action TabbedMenu supports that the
@@ -267,6 +285,9 @@ end
 ---Without an HQ there is no company at all, and that is by far the
 ---most likely reason someone is staring at a blank page — so say so
 ---explicitly rather than showing the generic "no contracts" line.
+---On the Dispatch tab the type toggle can also hide every row: if the
+---other type has contracts, say so and point at the toggle instead of
+---leaving a board that looks empty.
 function InGameMenuTransportCompanyFrame:_updateEmptyText(manager, company)
     if self.emptyText == nil then return end
 
@@ -282,8 +303,32 @@ function InGameMenuTransportCompanyFrame:_updateEmptyText(manager, company)
         key = "transportCompany_driversEmpty"
     elseif self.currentTab == InGameMenuTransportCompanyFrame.TAB_LEDGER then
         key = "transportCompany_noHistory"
+    elseif self.currentTab == InGameMenuTransportCompanyFrame.TAB_DISPATCH
+           and self:_otherTypeHasContracts(company) then
+        -- The current filter shows nothing but the other type is loaded:
+        -- name the toggle so the board does not read as empty.
+        key = self.contractTypeFilter == TransportCompanyContract.CONTRACT_TYPE_PALLET
+            and "transportCompany_noBulk"
+            or "transportCompany_noPallet"
     end
     self.emptyText:setText(g_i18n:getText(key))
+end
+
+---Does the OTHER contract type have any open jobs on this board? Used
+---only when the current filter yields an empty list, to decide whether
+---the empty text points at the toggle or genuinely says no freight.
+---@param company table|nil
+---@return boolean
+function InGameMenuTransportCompanyFrame:_otherTypeHasContracts(company)
+    if company == nil then return false end
+    for _, contract in pairs(company.contracts) do
+        if contract.state ~= TransportCompanyContract.STATE_COMPLETED and
+           contract.state ~= TransportCompanyContract.STATE_EXPIRED and
+           contract.contractType ~= self.contractTypeFilter then
+            return true
+        end
+    end
+    return false
 end
 
 ---The contract under the cursor, or nil when the selection is not an
@@ -347,6 +392,18 @@ function InGameMenuTransportCompanyFrame:_updateMenuButtons()
         if self.currentTab == InGameMenuTransportCompanyFrame.TAB_DISPATCH
            and self._company ~= nil and self._company:getIsActive() then
             table.insert(buttons, self.resetBoardButtonInfo)
+        end
+
+        -- The type toggle lives on the Dispatch board regardless of
+        -- whether anything is selected. Its label names the type
+        -- currently shown; pressing it swaps to the other.
+        if self.currentTab == InGameMenuTransportCompanyFrame.TAB_DISPATCH
+           and self.toggleTypeButtonInfo ~= nil then
+            self.toggleTypeButtonInfo.text = g_i18n:getText(
+                self.contractTypeFilter == TransportCompanyContract.CONTRACT_TYPE_PALLET
+                    and "transportCompany_contractTypePallet"
+                    or "transportCompany_contractTypeBulk")
+            table.insert(buttons, self.toggleTypeButtonInfo)
         end
     end
 
@@ -419,7 +476,8 @@ function InGameMenuTransportCompanyFrame:_buildDispatchRows(manager, company)
     if company == nil then return end
     for _, contract in pairs(company.contracts) do
         if contract.state ~= TransportCompanyContract.STATE_COMPLETED and
-           contract.state ~= TransportCompanyContract.STATE_EXPIRED then
+           contract.state ~= TransportCompanyContract.STATE_EXPIRED and
+           contract.contractType == self.contractTypeFilter then
 
             local stateText = ""
             if contract.state == TransportCompanyContract.STATE_AVAILABLE then
@@ -643,6 +701,19 @@ function InGameMenuTransportCompanyFrame:onButtonHelp()
     if TransportCompanyHelpDialog ~= nil and TransportCompanyHelpDialog.show ~= nil then
         TransportCompanyHelpDialog.show()
     end
+end
+
+---Flip the Dispatch board between the two contract types. The board
+---lists either bulk freight or pallet freight, never both at once, so
+---the player always knows which type is in front of them and the label
+---on this button names it.
+function InGameMenuTransportCompanyFrame:onButtonToggleType()
+    if self.contractTypeFilter == TransportCompanyContract.CONTRACT_TYPE_PALLET then
+        self.contractTypeFilter = TransportCompanyContract.CONTRACT_TYPE_BULK
+    else
+        self.contractTypeFilter = TransportCompanyContract.CONTRACT_TYPE_PALLET
+    end
+    self:updateTabContent()
 end
 
 -- ── Detail panel ───────────────────────────────

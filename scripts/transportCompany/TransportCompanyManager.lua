@@ -296,6 +296,11 @@ function TransportCompanyManager:_onMissionLoaded()
         self:_registerPdaPage()
     end
 
+    -- Explain a hidden Transport Company tab: when the player opens
+    -- the in-game menu without an HQ, the tab is gone (see
+    -- _registerPdaPage) and a dialog says why.
+    self:_installMenuOpenHook()
+
     -- Register intro hints (appear in base Settings → Gameplay → Hints)
     self:_registerHints()
 
@@ -535,16 +540,20 @@ function TransportCompanyManager:_registerPdaPage()
             pcall(inGameMenu.pagingElement.updatePageMapping, inGameMenu.pagingElement)
         end
 
-        -- The page stays enabled even with no HQ.
+        -- The page stays hidden until the player has an HQ.
         --
-        -- It used to be gated on _hasHq(), which is re-evaluated every
-        -- time the menu opens (TabbedMenu:updatePages, TabbedMenu.lua:79)
-        -- so it did work — but a tab that is simply absent until you
-        -- happen to buy the right building is undiscoverable, and reads
-        -- as "the mod is broken". The frame now shows a message telling
-        -- the player to place an HQ instead of hiding itself.
+        -- A visible tab with nothing in it read as a broken mod: players
+        -- reported "no contracts in the dispatch" when the real reason
+        -- was that no HQ was placed, so the board generator had nothing
+        -- to fill. Hiding the tab removes the broken-looking page, and
+        -- _installMenuOpenHook shows a dialog explaining why it is gone.
+        --
+        -- The predicate is re-evaluated every time the menu opens
+        -- (TabbedMenu:updatePages, TabbedMenu.lua:79), so the tab
+        -- appears the moment an HQ is placed and vanishes again when
+        -- the last one is sold. No reload needed.
         local enablePredicate = function()
-            return true
+            return self:_hasHq()
         end
 
         if type(inGameMenu.registerPage) == "function" then
@@ -572,6 +581,43 @@ function TransportCompanyManager:_registerPdaPage()
 
     if not success then
         TransportCompanyLog.error("PDA page registration failed: %s", tostring(errorMsg))
+    end
+end
+
+---Hook the in-game menu so the player is told why the Transport
+---Company tab is missing. The tab is hidden until an HQ is placed
+---(see _registerPdaPage), and a hidden tab reads as a broken mod
+---unless the game says why. Once per mission.
+function TransportCompanyManager:_installMenuOpenHook()
+    if self._menuOpenHookInstalled then return end
+    self._menuOpenHookInstalled = true
+
+    if g_inGameMenu == nil or InGameMenu == nil then return end
+
+    -- InGameMenu:onMenuOpened runs after the pages are set up and the
+    -- enabling predicates have been evaluated, so the tab state is
+    -- already final when this fires. Appending keeps the base game's
+    -- own behavior (spectator farm redirect) intact.
+    local manager = self
+    local original = InGameMenu.onMenuOpened
+    InGameMenu.onMenuOpened = function(inGameMenu, ...)
+        if original ~= nil then
+            original(inGameMenu, ...)
+        end
+        manager:_maybeShowNoHqDialog()
+    end
+end
+
+---When the player opens the in-game menu without an HQ for their own
+---farm, show a dialog telling them to place one. The tab is hidden in
+---that state, so without this the mod is simply absent.
+function TransportCompanyManager:_maybeShowNoHqDialog()
+    if g_currentMission == nil or g_gui == nil then return end
+    if self:_hasHq() then return end
+    -- A dialog already on top of the menu must not be doubled.
+    if g_gui:getIsDialogVisible() then return end
+    if InfoDialog ~= nil and InfoDialog.show ~= nil then
+        InfoDialog.show(g_i18n:getText("transportCompany_noHqDialog"))
     end
 end
 
@@ -1168,8 +1214,8 @@ function TransportCompanyManager:_enrollTrucks()
             local farmId = vehicle:getOwnerFarmId()
             if uniqueId ~= nil and uniqueId ~= ""
                and farmId ~= nil and farmId > 0 then
-                local company = self:getOrCreateCompany(farmId)
-                if company ~= nil then
+                local company = self:getCompany(farmId)
+                if company ~= nil and not company.isArchived then
                     local truck = company.trucks[uniqueId]
                     if truck == nil then
                         truck = TransportCompanyTruck.new(vehicle)
