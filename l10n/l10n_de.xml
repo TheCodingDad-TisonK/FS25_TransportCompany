@@ -28,7 +28,10 @@
         <e k="transportCompany_statusCompleted" v="Abgeschlossen"/>
         <e k="transportCompany_statusExpired" v="Erloschen"/>
         <e k="transportCompany_noHq" v="Noch kein Transportunternehmen. Kaufe die Transportunternehmen-Zentrale beim Händler (Gebäude &gt; Hallen) und stelle sie auf deinem Hof auf, um die Disposition zu öffnen."/>
+        <e k="transportCompany_noHqDialog" v="Stelle zuerst die Transportunternehmen-Zentrale auf. Kaufe sie beim Händler unter Gebäude &gt; Hallen und stelle sie auf deinem Hof auf, um die Disposition zu öffnen."/>
         <e k="transportCompany_noContracts" v="Keine Fracht verfügbar. Aufträge erscheinen, sobald eine Station Ware zum Abholen hat. Fülle ein eigenes Silo oder warte, bis eine Produktion Bestand aufgebaut hat."/>
+        <e k="transportCompany_noBulk" v="Zurzeit kein Schüttgut-Auftrag auf dem Brett. Wechsle, um Palettenfracht anzuzeigen."/>
+        <e k="transportCompany_noPallet" v="Zurzeit kein Palettenfracht-Auftrag auf dem Brett. Wechsle, um Schüttgut anzuzeigen."/>
         <e k="transportCompany_acceptContract" v="Auftrag annehmen"/>
         <e k="transportCompany_hireDriver" v="Fahrer anstellen"/>
         <e k="transportCompany_contractTypeBulk" v="Schüttgut"/>

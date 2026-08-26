@@ -371,5 +371,23 @@ mgr:update(TransportCompanyManager.RETURN_RETRY_DELAY_MS + 1)
 ok(#mgr._pendingReturnTrips == 0, "no third attempt after the retry", #mgr._pendingReturnTrips)
 ok(#startedJobs == 0, "no GOTO started when validate keeps failing")
 
+print("\n-- no-HQ menu dialog --")
+g_gui = { getIsDialogVisible = function() return false end }
+local dialogShown = nil
+InfoDialog = { show = function(text) dialogShown = text end }
+mgr._hasHq = function() return true end
+mgr:_maybeShowNoHqDialog()
+ok(dialogShown == nil, "no dialog when an HQ is placed", tostring(dialogShown))
+mgr._hasHq = function() return false end
+mgr:_maybeShowNoHqDialog()
+ok(dialogShown ~= nil, "dialog shown without an HQ", tostring(dialogShown))
+dialogShown = nil
+g_gui.getIsDialogVisible = function() return true end
+mgr:_maybeShowNoHqDialog()
+ok(dialogShown == nil, "dialog not doubled over an open dialog", tostring(dialogShown))
+g_gui = nil
+mgr:_maybeShowNoHqDialog()
+ok(dialogShown == nil, "no dialog without a GUI", tostring(dialogShown))
+
 print(string.format("\n%d passed, %d failed", pass, fail))
 return fail

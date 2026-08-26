@@ -28,7 +28,10 @@
         <e k="transportCompany_statusCompleted" v="Completed"/>
         <e k="transportCompany_statusExpired" v="Expired"/>
         <e k="transportCompany_noHq" v="No Transport Company yet. Buy the Transport Company HQ from the shop (Buildings &gt; Sheds) and place it on your farm to open the dispatch office."/>
+        <e k="transportCompany_noHqDialog" v="Place the Transport Company HQ first. Buy it from the shop under Buildings &gt; Sheds and put it on your farm to open the dispatch office."/>
         <e k="transportCompany_noContracts" v="No freight available. Contracts appear when a station holds goods to collect, so fill a silo you own or wait for a production to build up stock."/>
+        <e k="transportCompany_noBulk" v="No bulk freight on the board right now. Toggle to show pallet freight."/>
+        <e k="transportCompany_noPallet" v="No pallet freight on the board right now. Toggle to show bulk freight."/>
         <e k="transportCompany_acceptContract" v="Accept contract"/>
         <e k="transportCompany_hireDriver" v="Hire driver"/>
         <e k="transportCompany_contractTypeBulk" v="Bulk freight"/>
