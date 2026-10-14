@@ -49,3 +49,8 @@ folded into a single version.
 - Cross-mod APIs with the Realistic Farming ecosystem.
 - Map navigation to a contract's pickup/drop-off; per-truck efficiency
   ratings feeding a smarter fuel estimate; premium long-term contracts.
+
+## 2026-10-14: the build script packs only the mod
+
+- [x] `build.py` keeps the `.git` file out of the zip. In a git worktree `.git` is a file, not a directory, so EXCLUDE_DIRS alone let it into the zip.
+- Build tooling only, no in-game check. Found by a fleet sweep that built every mod once from development in a throwaway worktree.

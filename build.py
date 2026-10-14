@@ -22,7 +22,9 @@ EXCLUDE_EXTS = {".sh", ".py", ".md", ".txt", ".DS_Store", ".zip", ".ps1"}
 # The TestRunner rejects anything outside the allowed extensions
 # (.xml .lua .dds .i3d .shapes .anim .ogg .wav .gls .ogv .gdm .grle
 # .cache), so extensionless repo files must be kept out of the zip.
-EXCLUDE_FILES = {".gitignore", "icon_source.png", "LICENSE", "LICENCE"}
+# ".git" is a FILE, not a directory, in a git worktree (it points at the main
+# clone's git dir), so EXCLUDE_DIRS alone does not keep it out of the zip.
+EXCLUDE_FILES = {".git", ".gitignore", "icon_source.png", "LICENSE", "LICENCE"}
 
 
 def build_zip():

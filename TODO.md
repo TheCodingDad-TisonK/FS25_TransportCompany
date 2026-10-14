@@ -36,3 +36,8 @@ Built in four internal phases that folded into one release.
 
 - Custom HQ model, map navigation to a contract's pickup/drop-off,
   per-truck efficiency ratings, premium long-term contracts.
+
+## 2026-10-14: build packaging
+
+- [x] `build.py` keeps the `.git` file out of the zip. In a git worktree `.git` is a file, not a directory, so EXCLUDE_DIRS alone let it into the zip.
+- [x] Checked: development built from a worktree gave 27 entries, one of them the `.git` file; this branch gives 26, exactly that file removed, nothing added, every other entry byte-identical.
